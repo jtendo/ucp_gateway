@@ -1,4 +1,4 @@
--module(smspp).
+-module(ucp_smspp).
 -author('rafal.galczynski@jtendo.com').
 
 -include("../include/apdu.hrl").

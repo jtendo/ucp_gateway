@@ -6,12 +6,12 @@
 %%% @end
 %%% Created : 16 Mar 2011 by Rafał Gałczyński <>
 %%%-------------------------------------------------------------------
--module(smsc_connection).
+-module(ucp_conn).
 
 -behaviour(gen_server).
--include("../include/ucp_syntax.hrl").
--include("../include/logger.hrl").
--include("../include/utils.hrl").
+-include("ucp_syntax.hrl").
+-include("logger.hrl").
+-include("utils.hrl").
 
 %% gen_server callbacks
 -export([init/1,
@@ -20,8 +20,7 @@
          handle_info/2,
          terminate/2,
          code_change/3,
-         load_config/0,
-         start_link/5]).
+         start_link/1]).
 
 -define(SERVER, ?MODULE).
 -define(TCP_OPTIONS, [binary, {packet, 0}, {active, false}, {reuseaddr, true}]).
@@ -53,9 +52,8 @@
 %% @spec start_link(Host, Port, Login, Password, UName) -> {ok, Pid} | ignore | {error, Error}
 %% @end
 %%--------------------------------------------------------------------
-start_link(Host, Port, Login, Password, UName) ->
-    gen_server:start_link({local, UName},
-                          ?MODULE, [Host, Port, Login, Password, UName], []).
+start_link({Host, Port, Login, Password, UName}) ->
+    gen_server:start_link(?MODULE, [Host, Port, Login, Password, UName], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -73,41 +71,33 @@ start_link(Host, Port, Login, Password, UName) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Address, Port, Login, Password, UName]) ->
-    case load_config() of
-        {ok, SMSConnConfig} ->
-            %% process_flag(trap_exit, true),
-            UcpIP = lists:foldr(
-                      fun(X, Acc) ->
-                              [ucp_utils:fill_with_zeros(X,3)|Acc]
-                      end,
-                      [],
-                      string:tokens(Address,".")),
-            State = #state{ addr=Address, port=Port, pass=Password,
-                            login=Login, state=disconnected,
-                            last_usage=erlang:now(), unique_name = UName,
-                            ucp_ipport = lists:flatten(UcpIP) ++ integer_to_list(Port),
-                            seq = "00",
-                            reply_timeout = proplists:get_value(smsc_reply_timeout, SMSConnConfig, 20000),
-                            keepalive_time = proplists:get_value(smsc_keepalive_time, SMSConnConfig, 62000),
-                            reconnect_time = proplists:get_value(smsc_reconnect_time, SMSConnConfig, 20000),
-                            default_originator = proplists:get_value(smsc_default_originator, SMSConnConfig, "2147"),
-                            send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000")
-                          },
-            case smsc_connect(State) of
-                {ok, NState, _} ->
-                    spawn_link(fun() -> keepalive(NState) end),
-                    {ok, NState};
-                {error, _NState, Reason} ->
-                    ?SYS_ERROR("Error connecting to smsc ~p, ~p",
-                               [State#state.unique_name, Reason]),
-                    {stop, normal}
-            end;
-        {error, smsc_connection_conf_corrupted} ->
-            ?SYS_DEBUG("~p", ["Error in smsc_conn.conf, ignoring of starting connection"]),
-            ignore
+    {ok, SMSConnConfig} = get_config(),
+    UcpIP = lists:foldr(
+              fun(X, Acc) ->
+                      [ucp_utils:fill_with_zeros(X,3)|Acc]
+              end,
+              [],
+              string:tokens(Address,".")),
+    State = #state{ addr=Address, port=Port, pass=Password,
+                    login=Login, state=disconnected,
+                    last_usage=erlang:now(), unique_name = UName,
+                    ucp_ipport = lists:flatten(UcpIP) ++ integer_to_list(Port),
+                    seq = "00",
+                    reply_timeout = proplists:get_value(smsc_reply_timeout, SMSConnConfig, 20000),
+                    keepalive_time = proplists:get_value(smsc_keepalive_time, SMSConnConfig, 62000),
+                    reconnect_time = proplists:get_value(smsc_reconnect_time, SMSConnConfig, 20000),
+                    default_originator = proplists:get_value(smsc_default_originator, SMSConnConfig, "2147"),
+                    send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000")
+                  },
+    case smsc_connect(State) of
+        {ok, NState, _} ->
+            spawn_link(fun() -> keepalive(NState) end),
+            pg2:join(ucp_conn_pool, self()),
+            {ok, NState};
+        {error, _NState, Reason} ->
+            ?SYS_ERROR("Error connecting to smsc ~p, ~p", [State#state.unique_name, Reason]),
+            {stop, normal}
     end.
-
-
 
 %%--------------------------------------------------------------------
 %% @private
@@ -123,6 +113,10 @@ init([Address, Port, Login, Password, UName]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+
+handle_call(make_error, _From, State) ->
+    i_want_to_die = right_now,
+    {reply, ok, State};
 
 handle_call({send_message,{Receiver, Msg, ReqId}}, _From, State) ->
     Seq = ucp_utils:get_next_seq(State#state.seq),
@@ -143,14 +137,13 @@ handle_call({send_binary_message,{Receiver, Msg, ReqId}}, _From, State) ->
 
 handle_call(terminate, _From, State) ->
     ?SYS_DEBUG("SMSC ~p received terminate call, disabled in configuration", [State#state.unique_name]),
-    {stop, normal , State};
+    {stop, normal, State};
 
 handle_call(get_name, _From, State) ->
     Reply = State#state.unique_name,
     {reply, Reply , State};
 
 handle_call(stop, _From, State)->
-
     {stop, normal, stopped, State};
 
 handle_call(get_actual_config, _From, State) ->
@@ -418,20 +411,13 @@ sleep(T) ->
         T -> true
     end.
 
+% TODO: replace with real configuration
+get_config() ->
+    SMSConnConfig = [
+        {smsc_reply_timeout, 20000},
+        {smsc_default_originator, "orange.pl"},
+        {smsc_keepalive_time, 60000},
+        {smsc_reconnect_time, 20000},
+        {smsc_send_interval, 200}],
+    {ok, SMSConnConfig}.
 
-load_config(Filename) ->
-    case file:consult(?PRIV(Filename)) of
-        {ok, SMSCConf} ->
-            {ok, SMSCConf};
-        {error, _Reason} ->
-            ?SYS_FATAL("Invalid ~s", [Filename]),
-            {error, smsc_connection_conf_corrupted}
-    end.
-
-load_config() ->
-    case load_config("smsc_conn.conf") of
-        {ok, SMSConfig} ->
-            {ok, SMSConfig};
-        {error, smsc_connection_conf_corrupted} ->
-            {error, smsc_connection_conf_corrupted}
-    end.

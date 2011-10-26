@@ -1,10 +1,10 @@
--module(smsc_retry).
+-module(ucp_conn_retry).
 -author('rafal.galczynski@jtendo.com').
 
 -include_lib("stdlib/include/qlc.hrl").
--include("../include/smsc_retry.hrl").
--include("../include/logger.hrl").
--include("../include/utils.hrl").
+-include("smsc_retry.hrl").
+-include("logger.hrl").
+-include("utils.hrl").
 
 
 -export([

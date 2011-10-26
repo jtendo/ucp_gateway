@@ -1,7 +1,7 @@
--define(PRIV(Fname), filename:join([code:priv_dir(ucp), Fname])).
+-define(PRIV(Fname), filename:join([code:priv_dir(ucp_gateway), Fname])).
 
 -define(PRIV_SUBDIR(Dirname),
-    lists:append(filename:join([code:priv_dir(ucp), Dirname]), "/")).
+    lists:append(filename:join([code:priv_dir(ucp_gateway), Dirname]), "/")).
 
 -define(DUMPFILE, fun(Dirname, Suff) ->
         Dumpdir = ?PRIV_SUBDIR(Dirname),

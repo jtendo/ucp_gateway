@@ -1,9 +1,6 @@
 -ifndef(ucp_syntax).
 -define(ucp_syntax, true).
 
-
-
-
 -record(header, {
           trn = 0,
           %% Transaction reference number, right justified with leading zero.
