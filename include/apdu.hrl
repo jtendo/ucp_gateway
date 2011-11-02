@@ -134,7 +134,7 @@
           cntr,                %% Replay detection and Sequence Integrity counter.
           pcntr,               %% This indicates the number of padding octets used
                                %% for ciphering at the end of the secured data.
-          rc_cc_ss,            %% Length depends on the algorithm. A typical value is 8 octets if
+          rc_cc_ds,            %% Length depends on the algorithm. A typical value is 8 octets if
                                %% used, and for a DS could be 48 or more octets; the minimum
                                %% should be 4 octets.
 
@@ -144,3 +144,6 @@
                                %% in subsequent concatenated short messages.
 
          }).
+
+-record(card_profile, {spi, kic, kid, kic_key1, kic_key2, kid_key1, kid_key2}).
+

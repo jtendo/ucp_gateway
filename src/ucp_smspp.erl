@@ -5,97 +5,278 @@
 -include("../include/logger.hrl").
 -compile([export_all]).
 -compile([debug_info]).
+-define(CHUNK_SIZE, 113).
 
 t() ->
-    %% Data = <<16#80, 16#EF, 16#57, 16#9B, 16#AE, 16#EC, 16#BE, 16#69,
-    %%          16#41, 16#A6, 16#DC, 16#0D, 16#43, 16#7D, 16#55, 16#3F,
-    %%          16#E1, 16#20, 16#02, 16#67, 16#65, 16#CF, 16#49, 16#7D,
-    %%          16#EE, 16#5D>>,
-    Data = <<16#03, 16#10, 16#00, 16#60, 16#02, 16#00, 16#1A, 16#4D,
-             16#3A, 16#20, 16#35, 16#30, 16#31, 16#30, 16#30, 16#30,
-             16#30, 16#30, 16#30, 16#20, 16#4F, 16#3A, 16#20, 16#4F,
-             16#72, 16#61, 16#6E, 16#67, 16#65, 16#20, 16#4F, 16#6E,
-             16#65, 16#03, 16#00, 16#0C, 16#04, 16#00, 16#4E, 16#6F,
-             16#77, 16#79, 16#20, 16#6E, 16#75, 16#6D, 16#65, 16#72,
-             16#03, 16#00, 16#0E, 16#05, 16#00, 16#5A, 16#6D, 16#69,
-             16#65, 16#6E, 16#20, 16#6F, 16#66, 16#65, 16#72, 16#74,
-             16#65, 16#00, 16#00, 16#20, 16#F6, 16#00, 16#00, 16#1C,
-             16#FF, 16#00, 16#19, 16#01, 16#61, 16#61, 16#61, 16#61,
-             16#61, 16#61, 16#61, 16#61, 16#61, 16#61, 16#61, 16#61,
-             16#61, 16#61, 16#61, 16#61, 16#61, 16#61, 16#61, 16#61,
-             16#61, 16#61, 16#61, 16#61>>,
-    XX = smspp:create_tpud_message(Data),
-    [binpp:pprint(X) || X <- XX].
 
+    %% Data = <<16#00, 16#00, 16#00, 16#00, 16#00, 16#00, 16#00, 16#00>>,
+    %% Data = <<16#6D, 16#61, 16#72, 16#63, 16#65, 16#6C, 16#20, 16#69, 16#20, 16#77, 16#69, 16#65, 16#72, 16#61,
+    %%          16#6D, 16#61, 16#72, 16#63, 16#65, 16#6C, 16#20, 16#69, 16#20, 16#77, 16#69, 16#65, 16#72, 16#61,
+    %%          16#6D, 16#61, 16#72, 16#63, 16#65, 16#6C, 16#20, 16#69, 16#20, 16#77, 16#69, 16#65, 16#72, 16#61,
+    %%          16#6D, 16#61, 16#72, 16#63, 16#65, 16#6C, 16#20, 16#69, 16#20, 16#77, 16#69, 16#65, 16#72, 16#61,
+    %%          16#6D, 16#61, 16#72, 16#63, 16#65, 16#6C, 16#20, 16#69, 16#20, 16#77, 16#69, 16#65, 16#72, 16#61,
+    %%          16#6D, 16#61, 16#72, 16#63, 16#65, 16#6C, 16#20, 16#69, 16#20, 16#77, 16#69, 16#65, 16#72, 16#61,
+    %%          16#6D, 16#61, 16#72, 16#63, 16#65, 16#6C, 16#20, 16#69, 16#20, 16#77, 16#69, 16#65, 16#72, 16#61,
+    %%          16#6D, 16#61, 16#72, 16#63, 16#65, 16#6C, 16#20, 16#69, 16#20, 16#77, 16#69, 16#65, 16#72, 16#61,
+    %%          16#6D, 16#61, 16#72, 16#63, 16#65, 16#6C, 16#20, 16#69, 16#20, 16#77, 16#69, 16#65, 16#72, 16#61
+    %%        >>,
+    Data = erlang:list_to_binary("JTENDO JTENDO"),
+    TAR = <<16#52, 16#41, 16#44>>, %% Toolkit Application Reference (TAR): 3 octets.
 
-create_tpud_message(Data) when is_binary(Data)->
-    KIC1 = ?KIC_ALGORITHM_KNOWN bor ?KIC_ALGORITHM_3DES2 bor 2#100000, %% key id
-    KID1 = ?KID_ALGORITHM_KNOWN bor ?KID_ALGORITHM_3DES2 bor 2#100000, %% key id
-    %% Key1 = <<16#30, 16#42, 16#30, 16#42, 16#30, 16#44, 16#30, 16#44, 16#30, 16#45, 16#30, 16#45, 16#30, 16#46, 16#30, 16#46>>,
-    Key1 = <<16#01,16#23,16#45,16#67,16#89,16#ab,16#cd,16#ef>>,
-    Key2 = <<16#02,16#23,16#45,16#67,16#89,16#ab,16#cd,16#ef>>,
-
-    %% TAR = <<16#52, 16#41, 16#44>>, %% Toolkit Application Reference (TAR): 3 octets.
-    TAR = <<16#44, 16#41, 16#52>>, %% Toolkit Application Reference (TAR): 3 octets.
     SPIA =
         ?SPI_CC bor
         ?SPI_ENCRYPTION bor
-        ?SPI_NO_COUNTER,
+        ?SPI_COUNTER_AVAILABLE_NOT_CHECKED,
     SPIB =
         ?SPI_POR_TO_SE bor
         ?SPI_POR_NO_RC_CC_DS bor
         ?SPI_POR_NOT_ENCRYPTED bor
         ?SPI_POR_SMS_DELIVER_REPORT,
-    SPI = <<SPIA, SPIB>>,
-    CNTR = <<16#00, 16#00, 16#00, 16#00, 16#00>>, %% (Counter): 5 octets, counter management
 
-    RCCCSS = <<16#D8, 16#0C, 16#AB, 16#B2,
-               16#C3, 16#F3, 16#90, 16#3D>>,
-    SecureData = encrypt_data(Key1, Key2, ucp_utils:pad_to(8,Data)),
-    PCNTR = size(ucp_utils:pad_to(8,Data)) - size(Data),
-    %% 140 - 24 = 116
-    case size(Data) =< 116 of
+    SPI = <<SPIA:8, SPIB:8>>,
+    KIC = ?KIC_ALGORITHM_KNOWN bor ?KIC_ALGORITHM_3DES2 bor 2#100000, %% key id
+    KID = ?KID_ALGORITHM_KNOWN bor ?KID_ALGORITHM_3DES2 bor 2#101000, %% key id
+
+    KicKey1 = <<16#30, 16#42, 16#30, 16#42, 16#30, 16#44, 16#30, 16#44>>,
+    KicKey2 = <<16#30, 16#45, 16#30, 16#45, 16#30, 16#46, 16#30, 16#46>>,
+
+    KidKey1 = <<16#01, 16#23, 16#45, 16#67, 16#89, 16#AB, 16#CD, 16#EF>>,
+    KidKey2 = <<16#10, 16#02, 16#76, 16#FE, 16#DC, 16#BA, 16#01, 16#23>>,
+
+    CardProfile = #card_profile{
+      spi=SPI,
+      kic= <<KIC>>,
+      kid= <<KID>>,
+      kic_key1=KicKey1,
+      kic_key2=KicKey2,
+      kid_key1=KidKey1,
+      kid_key2=KidKey2
+     },
+
+    [X] = smspp:create_tpud_message(CardProfile, TAR, Data),
+    binpp:pprint(X),
+    C = create_whole_command(X),
+    binpp:pprint(C).
+
+
+create_tpud_message(CProf, TAR, Data) when is_binary(Data)->
+    {ok, data, TPUD, rcccds, RC_CC_DS, pcntr, PCNTR} = create_tpud(CProf, TAR, Data),
+    case size(TPUD) =< ?CHUNK_SIZE of
         true ->
-            create_tpud(#tpud{
-               udhl =  <<16#02>>, %% 02h  [
-               ieia =  <<16#70>>, %% 70h  [ UDH Command packet
-               iedla = <<16#00>>, %% 00h [
-               spi = SPI,
-               kic = <<KIC1>>,
-               kid = <<KID1>>,
-               tar = TAR,
-               cntr = CNTR,
-               pcntr = <<PCNTR>>,
-               rc_cc_ss = RCCCSS,
-               secured_data = SecureData});
+            [TPUD];
         false ->
-            DataParts = ucp_utils:binary_split(SecureData,140),
-            Sec = 1,
-            Act = 1,
+            DataParts = ucp_utils:binary_split(TPUD,?CHUNK_SIZE),
+            Sec = 0,
+            Act = 0,
             Tot = length(DataParts),
+            CNTR = <<16#00, 16#00, 16#00, 16#00, 16#00>>, %% (Counter): 5 octets, counter management
             Tpuds = create_tpud_concatenated(
                       #concatenated_tpud{ieia = <<00>>,
                                          ieidla = <<03>>,
                                          ieida = <<Sec,Act,Tot>>,
                                          ieidlb = <<00>>,
                                          ieib = <<70>>,
-                                         spi = SPI,
-                                         kic = <<KIC1>>,
-                                         kid = <<KID1>>,
+                                         spi = CProf#card_profile.spi,
+                                         kic = CProf#card_profile.kic,
+                                         kid = CProf#card_profile.kid,
                                          tar = TAR,
                                          cntr = CNTR,
                                          pcntr = <<PCNTR>>,
-                                         rc_cc_ss = RCCCSS
+                                         rc_cc_ds = RC_CC_DS
                                         }, DataParts, []),
             Tpuds
 
     end.
 
 
-
-encrypt_data(Key1, Key2, Data) ->
+calculate_mac(Key1, Key2, Data) ->
+    [Block| Rest] = ucp_utils:binary_split(Data, 8),
     IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
-    crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, Data).
+    Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, Block),
+    ?SYS_DEBUG("block                  ~p~n",[hex:bin_to_hexstr(Block)]),
+    ?SYS_DEBUG("res                    ~p~n",[hex:bin_to_hexstr(Res)]),
+    [ NextBlock | RestBlocks ] = Rest,
+    calculate_mac(Key1, Key2, Res, NextBlock, RestBlocks).
+
+calculate_mac(Key1, Key2, LastBlock, Block, []) ->
+    IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
+    Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, LastBlock, Block),
+    Mac = crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, Res),
+    ?SYS_DEBUG("RES                  ~p~n",[hex:bin_to_hexstr(IVec)]),
+    ?SYS_DEBUG("CC                  ~p~n",[hex:bin_to_hexstr(Mac)]),
+    Mac;
+
+calculate_mac(Key1, Key2, LastBlock, Block, Rest) ->
+    Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, LastBlock, Block),
+    [ NextBlock | RestBlocks ] = Rest,
+    ?SYS_DEBUG("block                  ~p~n",[hex:bin_to_hexstr(Block)]),
+    ?SYS_DEBUG("res                    ~p~n",[hex:bin_to_hexstr(Res)]),
+    calculate_mac(Key1, Key2, Res, NextBlock, RestBlocks).
+
+binary_xor(B1, B2) ->
+    erlang:list_to_binary(
+      lists:zipwith(
+        fun(X, Y) ->
+                X bxor Y
+        end,
+        erlang:binary_to_list(B1),
+        erlang:binary_to_list(B2)
+       )
+     ).
+
+
+des3_encrypt_data(Key1, Key2, Data) ->
+    IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
+    crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, ucp_utils:pad_to(8,Data)).
+
+des3_encrypt_data(Key1, Key2, Data, IVec) ->
+    crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, ucp_utils:pad_to(8,Data)).
+
+
+des_encrypt_data(Key, IVec, Data) ->
+    crypto:des_cbc_encrypt(Key, IVec, ucp_utils:pad_to(8,Data)).
+
+des_decrypt_data(Key, IVec, Data) ->
+    crypto:des_cbc_decrypt(Key, IVec, ucp_utils:pad_to(8,Data)).
+
+create_tpud(CProf, TAR, Data) ->
+    CNTR = <<16#00, 16#00, 16#00, 16#00, 16#00>>, %% (Counter): 5 octets, counter management
+    KIC = CProf#card_profile.kic,
+    KID = CProf#card_profile.kic,
+    <<SPIA, SPIB>> = CProf#card_profile.spi,
+    ConstPart = <<SPIA:8, SPIB:8, KIC/binary, KID/binary, TAR/binary>>,
+    SizeOfDataToCrypt = size(Data) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
+    PCNTR = (8-(SizeOfDataToCrypt rem 8)),
+
+    CHL = size(ConstPart) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
+    CPL = size(ConstPart) + SizeOfDataToCrypt + PCNTR + 1,
+
+    ToCC_nopadding = <<CPL:16, CHL:8, ConstPart/binary, CNTR/binary, PCNTR:8, Data/binary>>,
+    ToCC = ucp_utils:pad_to(8,ToCC_nopadding),
+
+    RC_CC_DS = calculate_mac(
+                 CProf#card_profile.kid_key1,
+                 CProf#card_profile.kid_key2,
+                 ToCC),
+
+    ToCrypt = <<CNTR/binary, PCNTR:8, RC_CC_DS/binary, Data/binary>>,
+
+    SecureData = des3_encrypt_data(
+                   CProf#card_profile.kic_key1,
+                   CProf#card_profile.kic_key2,
+                   ToCrypt),
+
+    ?SYS_DEBUG("CPL                  ~p, ~p~n", [hex:int_to_hexstr(CPL), CPL]),
+    ?SYS_DEBUG("CHL                  ~p, ~p~n", [hex:int_to_hexstr(CHL), CHL]),
+    ?SYS_DEBUG("SPI                  ~p~n",     [hex:bin_to_hexstr(CProf#card_profile.spi)]),
+    ?SYS_DEBUG("KIC                  ~p~n",     [hex:bin_to_hexstr(KIC)]),
+    ?SYS_DEBUG("KID                  ~p~n",     [hex:bin_to_hexstr(KID)]),
+    ?SYS_DEBUG("TAR                  ~p~n",     [hex:bin_to_hexstr(TAR)]),
+    ?SYS_DEBUG("CNTR                 ~p~n",     [hex:bin_to_hexstr(CNTR)]),
+    ?SYS_DEBUG("PCNTR                ~p~n",     [hex:int_to_hexstr(PCNTR)]),
+    ?SYS_DEBUG("TO-CC                ~p~n",     [hex:bin_to_hexstr(ToCC)]),
+    ?SYS_DEBUG("RCCCDS               ~p~n",     [hex:bin_to_hexstr(RC_CC_DS)]),
+    ?SYS_DEBUG("DATA                 ~p~n",     [hex:bin_to_hexstr(Data)]),
+    ?SYS_DEBUG("SDATA                ~p~n",     [hex:bin_to_hexstr(SecureData)]),
+
+    {ok,
+     data, <<CPL:16, CHL:8, ConstPart/binary, SecureData/binary>>,
+     rcccds, RC_CC_DS,
+     pcntr, PCNTR}.
+
+
+size_PCNTR(0) ->
+    0;
+size_PCNTR(4) ->
+    1;
+size_PCNTR(_) ->
+    1.
+
+size_RC_CC_DS(0) ->
+    0;
+size_RC_CC_DS(1) ->
+    4;
+size_RC_CC_DS(2) ->
+    8;
+size_RC_CC_DS(3) ->
+    8;
+size_RC_CC_DS(4) ->
+    0;
+size_RC_CC_DS(_) ->
+    8.
+
+size_CNTR(0) ->
+    0;
+size_CNTR(_) ->
+    5.
+
+
+create_tpud_concatenated(_,[], Acc) ->
+    Acc;
+
+create_tpud_concatenated(#concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, ieida = <<Sec,Act,Tot>>,
+                                            ieib = IEIb, ieidlb = IEIDLb, spi = SPI, kic = KIC,
+                                            kid = KID, tar = TAR, cntr = CNTR, pcntr = PCNTR,
+                                            rc_cc_ds = RC_CC_SS},
+                         [ActualPart|DataParts], Acc) ->
+    ASec = Sec+1,
+    AAct = Act+1,
+    Tpdu = create_tpud_concatenated(
+             #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, ieida = <<ASec,AAct,Tot>>,
+                                ieib = IEIb, ieidlb = IEIDLb, spi = SPI, kic = KIC,
+                                kid = KID, tar = TAR, cntr = CNTR, pcntr = PCNTR,
+                                rc_cc_ds = RC_CC_SS,
+                                secured_data_part = ActualPart}),
+    create_tpud_concatenated(
+      #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, ieida = <<ASec,AAct,Tot>>,
+                         ieib = IEIb, ieidlb = IEIDLb, spi = SPI, kic = KIC,
+                         kid = KID, tar = TAR, cntr = CNTR, pcntr = PCNTR,
+                         rc_cc_ds = RC_CC_SS
+                        }, DataParts, [Tpdu|Acc]).
+
+
+create_tpud_concatenated(#concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, ieida = IEIDa, ieib = IEIb, %% 70
+                                            ieidlb = IEIDLb, spi = SPI, kic = KIC, kid = KID, tar = TAR,
+                                            cntr = CNTR, pcntr = PCNTR, rc_cc_ds = RC_CC_SS,
+                                            secured_data_part = Data
+                                           }) ->
+
+    CHL = size(SPI) + size(KIC) + size(KID) +
+        size(TAR) + size(CNTR) + size(PCNTR) +
+        size(RC_CC_SS) +
+        size(Data),
+    CPL = CHL + 2,
+    UDHL = size(IEIa) + size(IEIDLa) + size(IEIDa) + size(IEIb) + size(IEIDLb),
+    UDL = UDHL + CPL + 2 + 1 + size(SPI) + size(KIC) +
+        size(KID) +  size(TAR) + size(CNTR) + size(PCNTR) +
+        size(RC_CC_SS) +
+        size(Data),
+
+
+    ?SYS_DEBUG("UDL                  ~p~n",[hex:int_to_hexstr(UDL)]),
+    ?SYS_DEBUG("UDHL                 ~p~n",[hex:int_to_hexstr(UDHL)]),
+    ?SYS_DEBUG("IEIa                 ~p~n",[hex:bin_to_hexstr(IEIa)]),
+    ?SYS_DEBUG("IEIDLa               ~p~n",[hex:bin_to_hexstr(IEIDLa)]),
+    ?SYS_DEBUG("IEIDa                ~p~n",[hex:bin_to_hexstr(IEIDa)]),
+    ?SYS_DEBUG("IEIb                 ~p~n",[hex:bin_to_hexstr(IEIb)]),
+    ?SYS_DEBUG("IEIDlb               ~p~n",[hex:bin_to_hexstr(IEIDLb)]),
+    ?SYS_DEBUG("CPL                  ~p~n",[hex:int_to_hexstr(CPL)]),
+    ?SYS_DEBUG("CHL                  ~p~n",[hex:int_to_hexstr(CHL)]),
+    ?SYS_DEBUG("SPI                  ~p~n",[hex:bin_to_hexstr(SPI)]),
+    ?SYS_DEBUG("KIC                  ~p~n",[hex:bin_to_hexstr(KIC)]),
+    ?SYS_DEBUG("KID                  ~p~n",[hex:bin_to_hexstr(KID)]),
+    ?SYS_DEBUG("TAR                  ~p~n",[hex:bin_to_hexstr(TAR)]),
+    ?SYS_DEBUG("CNTR                 ~p~n",[hex:bin_to_hexstr(CNTR)]),
+    ?SYS_DEBUG("PCNTR                ~p~n",[hex:bin_to_hexstr(PCNTR)]),
+    ?SYS_DEBUG("RCCCSS               ~p~n",[hex:bin_to_hexstr(RC_CC_SS)]),
+    ?SYS_DEBUG("DATA                 ~p~n",[hex:bin_to_hexstr(Data)]),
+
+
+    <<UDL:8, UDHL:8, IEIa/binary, IEIDLa/binary, IEIDa/binary, IEIb/binary, IEIDLb/binary,
+      CPL:16, CHL:8, SPI/binary, KIC/binary, KID/binary, TAR/binary, CNTR/binary,
+      PCNTR/binary, RC_CC_SS/binary, Data/binary >>.
+
+
 
 swap_msisdn(MSISDN) when erlang:length(MSISDN) == 9 ->
     swap_msisdn("48"++MSISDN);
@@ -105,180 +286,39 @@ swap_msisdn(MSISDN) when erlang:length(MSISDN) == 11 ->
               erlang:list_to_binary(MSISDN),2),
     lists:flatten(
       [lists:reverse(erlang:binary_to_list(X)) || X <- Parts]
-     ).
+     );
 
+swap_msisdn(MSISDN) ->
+    MSISDN.
 
 create_device_tlv(#device_tlv{source = SOURCE,
                               destination = DEST
                              }) ->
     TAG = <<16#02>>, %% HardCoded TAG
-    LENGTH = size(TAG) + size(SOURCE) + size(DEST),
+    LENGTH = size(SOURCE) + size(DEST),
+
+    ?SYS_DEBUG("DEVICE TAG           ~p~n",     [hex:bin_to_hexstr(TAG)]),
+    ?SYS_DEBUG("DEVICE LEN           ~p~n",     [hex:int_to_hexstr(LENGTH)]),
+    ?SYS_DEBUG("DEVICE SRC           ~p~n",     [hex:bin_to_hexstr(SOURCE)]),
+    ?SYS_DEBUG("DEVICE DST           ~p~n",     [hex:bin_to_hexstr(DEST)]),
     << TAG/binary,
        LENGTH:8,
        SOURCE/binary,
        DEST/binary>>.
 
-
 create_tp_address(#tp_address{ton_npi=TONNPI, address=ADDRESS}) ->
     TAG = <<16#06>>, %% HardCoded TAG
     LENGTH = size(TONNPI) + size(ADDRESS),
+
+    ?SYS_DEBUG("ADDRESS TAG          ~p~n",     [hex:bin_to_hexstr(TAG)]),
+    ?SYS_DEBUG("ADDRESS LEN          ~p~n",     [hex:int_to_hexstr(LENGTH)]),
+    ?SYS_DEBUG("ADDRESS TON/NPI      ~p~n",     [hex:bin_to_hexstr(TONNPI)]),
+    ?SYS_DEBUG("ADDRESS              ~p~n",     [hex:bin_to_hexstr(ADDRESS)]),
+
     << TAG/binary,
        LENGTH:8,
        TONNPI/binary,
        ADDRESS/binary >>.
-
-create_tpud(#tpud{udhl = UDHL,
-                  ieia =  IEIa,
-                  iedla = IEDLa,
-                  spi = SPI,
-                  kic = KIC,
-                  kid = KID,
-                  tar = TAR,
-                  cntr = CNTR,
-                  pcntr = PCNTR,
-                  rc_cc_ss = RC_CC_SS,
-                  secured_data = Data
-                 }) ->
-
-    ?SYS_DEBUG("UDHL   ~p~n",[UDHL]),
-    ?SYS_DEBUG("IEIa   ~p~n",[IEIa]),
-    ?SYS_DEBUG("IEIDLa ~p~n",[IEDLa]),
-    ?SYS_DEBUG("SPI    ~p~n",[SPI]),
-    ?SYS_DEBUG("KIC    ~p~n",[KIC]),
-    ?SYS_DEBUG("KID    ~p~n",[KID]),
-    ?SYS_DEBUG("TAR    ~p~n",[TAR]),
-    ?SYS_DEBUG("CNTR   ~p~n",[CNTR]),
-    ?SYS_DEBUG("PCNTR  ~p~n",[PCNTR]),
-    ?SYS_DEBUG("RCCCSS ~p~n",[RC_CC_SS]),
-    ?SYS_DEBUG("DATA   ~p~n",[Data]),
-
-
-    CHL = 21,
-    CPL = CHL + size(Data) + 1, %% CHL is coded on two bytes
-    [<<UDHL/binary,
-      IEIa/binary,
-      IEDLa/binary,
-      CPL:16,
-      CHL:8,
-      SPI/binary,
-      KIC/binary,
-      KID/binary,
-      TAR/binary,
-      CNTR/binary,
-      PCNTR/binary,
-      RC_CC_SS/binary,
-      Data/binary>>].
-
-create_tpud_concatenated(_,[], Acc) ->
-    Acc;
-
-create_tpud_concatenated(#concatenated_tpud{
-                                            ieia = IEIa, %% '00', indicating concatenated shortmessage
-                                            ieidla = IEIDLa, %% 3
-                                            ieida = <<Sec,Act,Tot>>,  %% refnum, sequence-num, total_messages 3 octets
-                                            ieib = IEIb, %% 70
-                                            ieidlb = IEIDLb, %% 00
-                                            %% cpl = CPL,  %%  length od ieib do secured_data?
-                                            %% chl = CHL, %% od spi do konca?
-                                            spi = SPI,
-                                            kic = KIC,
-                                            kid = KID,
-                                            tar = TAR,
-                                            cntr = CNTR,
-                                            pcntr = PCNTR,
-                                            rc_cc_ss = RC_CC_SS
-                                           }, [ActualPart|DataParts], Acc) ->
-    ASec = Sec+1,
-    AAct = Act+1,
-    Tpdu = create_tpud_concatenated(#concatenated_tpud{
-                                            ieia = IEIa, %% '00', indicating concatenated shortmessage
-                                            ieidla = IEIDLa, %% 3
-                                            ieida = <<ASec,AAct,Tot>>,  %% refnum, sequence-num, total_messages 3 octets
-                                            ieib = IEIb, %% 70
-                                            ieidlb = IEIDLb, %% 00
-                                            spi = SPI,
-                                            kic = KIC,
-                                            kid = KID,
-                                            tar = TAR,
-                                            cntr = CNTR,
-                                            pcntr = PCNTR,
-                                            rc_cc_ss = RC_CC_SS,
-                                            secured_data_part = ActualPart
-                                           }),
-    create_tpud_concatenated(#concatenated_tpud{
-                                            ieia = IEIa, %% '00', indicating concatenated shortmessage
-                                            ieidla = IEIDLa, %% 3
-                                            ieida = <<ASec,AAct,Tot>>,  %% refnum, sequence-num, total_messages 3 octets
-                                            ieib = IEIb, %% 70
-                                            ieidlb = IEIDLb, %% 00
-                                            spi = SPI,
-                                            kic = KIC,
-                                            kid = KID,
-                                            tar = TAR,
-                                            cntr = CNTR,
-                                            pcntr = PCNTR,
-                                            rc_cc_ss = RC_CC_SS
-                                           }, DataParts, [Tpdu|Acc]).
-
-
-create_tpud_concatenated(#concatenated_tpud{
-                                            ieia = IEIa, %% '00', indicating concatenated shortmessage
-                                            ieidla = IEIDLa, %% 3
-                                            ieida = IEIDa,  %% refnum, sequence-num, total_messages 3 octets
-                                            ieib = IEIb, %% 70
-                                            ieidlb = IEIDLb, %% 00
-                                            spi = SPI,
-                                            kic = KIC,
-                                            kid = KID,
-                                            tar = TAR,
-                                            cntr = CNTR,
-                                            pcntr = PCNTR,
-                                            rc_cc_ss = RC_CC_SS,
-                                            secured_data_part = Data
-                                           }) ->
-    CHL = size(SPI) + size(KIC) + size(KID) +
-        size(TAR) + size(CNTR) + size(PCNTR) + size(RC_CC_SS) + size(Data),
-    CPL = CHL + 2,
-    UDHL = size(IEIa) + size(IEIDLa) + size(IEIDa) + size(IEIb) + size(IEIDLb),
-    UDL = UDHL + CPL + 2 + 1 + size(SPI) + size(KIC) + size(KID) +  size(TAR) + size(CNTR) + size(PCNTR) + size(RC_CC_SS) + size(Data),
-
-    ?SYS_DEBUG("UDL    ~p~n",[UDL]),
-    ?SYS_DEBUG("UDHL   ~p~n",[UDHL]),
-    ?SYS_DEBUG("IEIa   ~p~n",[IEIa]),
-    ?SYS_DEBUG("IEIDLa ~p~n",[IEIDLa]),
-    ?SYS_DEBUG("IEIDa  ~p~n",[IEIDa]),
-    ?SYS_DEBUG("IEIb   ~p~n",[IEIb]),
-    ?SYS_DEBUG("IEIDlb ~p~n",[IEIDLb]),
-    ?SYS_DEBUG("CPL    ~p~n",[CPL]),
-    ?SYS_DEBUG("CHL    ~p~n",[CHL]),
-    ?SYS_DEBUG("SPI    ~p~n",[SPI]),
-    ?SYS_DEBUG("KIC    ~p~n",[KIC]),
-    ?SYS_DEBUG("KID    ~p~n",[KID]),
-    ?SYS_DEBUG("TAR    ~p~n",[TAR]),
-    ?SYS_DEBUG("CNTR   ~p~n",[CNTR]),
-    ?SYS_DEBUG("PCNTR  ~p~n",[PCNTR]),
-    ?SYS_DEBUG("RCCCSS ~p~n",[RC_CC_SS]),
-    ?SYS_DEBUG("DATA   ~p~n",[Data]),
-
-
-    <<UDL:8,
-      UDHL:8,
-      IEIa/binary,
-      IEIDLa/binary,
-      IEIDa/binary,
-      IEIb/binary,
-      IEIDLb/binary,
-      CPL:16,
-      CHL:8,
-      SPI/binary,
-      KIC/binary,
-      KID/binary,
-      TAR/binary,
-      CNTR/binary,
-      PCNTR/binary,
-      RC_CC_SS/binary,
-      Data/binary
-    >>.
 
 create_tpdu(#tpdu{mti_mms_udhl_rp = MTI_MMS_UDHL_RP,
                   address_len = ADDRESS_LEN,
@@ -297,6 +337,19 @@ create_tpdu(#tpdu{mti_mms_udhl_rp = MTI_MMS_UDHL_RP,
         size(TP_DCS) +
         size(TP_SCTS) +
         size(TP_UD) + 1, %% for TP_UDL
+
+    ?SYS_DEBUG("TPDU TAG             ~p~n",     [hex:bin_to_hexstr(TAG)]),
+    ?SYS_DEBUG("TPDU LEN             ~p~n",     [hex:int_to_hexstr(LENGTH)]),
+    ?SYS_DEBUG("TPDU MTI_MMS_UDHL_RP ~p~n",     [hex:bin_to_hexstr(MTI_MMS_UDHL_RP)]),
+    ?SYS_DEBUG("TPDU ADDRESS LEN     ~p~n",     [hex:int_to_hexstr(ADDRESS_LEN)]),
+    ?SYS_DEBUG("TPDU TON/NPI         ~p~n",     [hex:bin_to_hexstr(TON_NPI)]),
+    ?SYS_DEBUG("TPDU ADDRESS_VALUE   ~p~n",     [hex:bin_to_hexstr(ADDRESS_VALUE)]),
+    ?SYS_DEBUG("TPDU TP_PID          ~p~n",     [hex:bin_to_hexstr(TP_PID)]),
+    ?SYS_DEBUG("TPDU TP_DCS          ~p~n",     [hex:bin_to_hexstr(TP_DCS)]),
+    ?SYS_DEBUG("TPDU TP_SCTS         ~p~n",     [hex:bin_to_hexstr(TP_SCTS)]),
+    ?SYS_DEBUG("TPDU TP_UDL          ~p~n",     [hex:int_to_hexstr(TP_UDL)]),
+    ?SYS_DEBUG("TPDU TP_UD           ~p~n",     [hex:bin_to_hexstr(TP_UD)]),
+
     << TAG/binary,
        LENGTH:8,
        MTI_MMS_UDHL_RP/binary,
@@ -313,10 +366,17 @@ create_apdu(#apdu{device_identity_tlv = DEVICE_IDENTITY_TLV,
                   address_tlv = ADDRESS_TLV,
                   sms_tpdu = SMS_TPDU
                  }) ->
+
     TAG = <<16#d1>>,
     LENGTH = size(DEVICE_IDENTITY_TLV)  +
         size(SMS_TPDU) +
         size(ADDRESS_TLV),
+    ?SYS_DEBUG("APDU TAG             ~p~n",     [hex:bin_to_hexstr(TAG)]),
+    ?SYS_DEBUG("APDU LEN             ~p~n",     [hex:int_to_hexstr(LENGTH)]),
+    ?SYS_DEBUG("APDU DEVICE_IDENTITY ~p~n",     [hex:bin_to_hexstr(DEVICE_IDENTITY_TLV)]),
+    ?SYS_DEBUG("APDU ADDRESS         ~p~n",     [hex:bin_to_hexstr(ADDRESS_TLV)]),
+    ?SYS_DEBUG("APDU TPDU            ~p~n",     [hex:bin_to_hexstr(SMS_TPDU)]),
+
     << TAG/binary,
        LENGTH:8,
        DEVICE_IDENTITY_TLV/binary,
@@ -325,82 +385,55 @@ create_apdu(#apdu{device_identity_tlv = DEVICE_IDENTITY_TLV,
 
 
 create_whole_command(Tpud) ->
-    Data = <<16#AA, 16#AA, 16#AA>>,
-    Tpud = create_tpud(Data),
 
-    Address = swap_msisdn("501501501"),
+    %% Address = swap_msisdn("3311111111"),
 
-    Device_tlv = create_device_tlv(#device_tlv{source = <<16#83>>, %% 83h is a source device (Network)
-                                               destination = <<16#81>> %% Value—the destination device of the command is the UICC
-                                              }),
 
-    TpAddress = create_tp_address(#tp_address{ton_npi= <<16#98>>,
-                                              address=Address}),
+    %% AddressBin = erlang:list_to_binary(Address),
+    AddressBin = <<51,17,17,17,17>>,
 
     Tpdu = create_tpdu(
-             #tpdu{mti_mms_udhl_rp= <<16#e4>>,
-                   address_len = size(Address)*2, %% number of octets
+             #tpdu{mti_mms_udhl_rp= <<16#E4>>,
+                   address_len = size(AddressBin)*2, %% number of octets
                    ton_npi = <<16#98>>,  %% NPI National numbering plan = 8 TON WTF ???
-                   address_value = Address, %% This strange swapped format
-                   tp_pid= <<16#7f>>, %% SIM data download
-                   tp_dcs= <<16#16>>, %% WHAT THE FUCK???
-                   tp_scts=erlang:list_to_binary(
-                             [16#0B,16#09,16#05,16#16,16#54,16#25,16#04]), %% WTF??
-                   tp_ud = Tpud
+                   address_value = AddressBin, %% This strange swapped format
+                   tp_pid = <<16#7f>>, %% SIM data download
+                   tp_dcs = <<16#16>>, %% WHAT THE FUCK???
+                   tp_scts = <<16#0B, 16#09, 16#27, 16#14, 16#33, 16#15, 16#04>>, %% ServiceCenter TimeStamp
+                   tp_ud = <<16#02, 16#70, 16#00, Tpud/binary>>
                   }),
+
+
+    Device_tlv = create_device_tlv(
+                   #device_tlv{source = <<16#83>>, %% 83h is a source device (Network)
+                               destination = <<16#81>> %% Value—the destination device of the command is the UICC
+                              }),
+
+    TpAddress = create_tp_address(
+                  #tp_address{ton_npi= <<16#98>>,
+                              address= AddressBin}),
+
 
     Apdu = create_apdu(
              #apdu{device_identity_tlv=Device_tlv,
                    address_tlv=TpAddress,
                    sms_tpdu=Tpdu}),
-    Command = erlang:list_to_binary([16#a0, 16#c2, 16#00, 16#00]), %% download command (CLA a0, INS c2 P1 00 p2 00) iso/iec 7816-4
+
+    Command = <<16#a0, 16#c2, 16#00, 16#00>>, %% download command (CLA a0, INS c2 P1 00 p2 00) iso/iec 7816-4
     Size = size(Apdu),
     << Command/binary, Size:8, Apdu/binary >>.
 
 
 
-%%84/00236/O/51/798151973/3796//1//3/0539//////0710110923/0127/////4/528/004015160015150000004A4BD36156F208E7A7B1EDFCA7C22C297C544CC85DE796C7D8EA697509CE5EEC886D949A43C05D0A625BC85EC334B497B0341FB3C7746222//0//2//////01030270000201F6///56
+%% gem
+%% 00 38 15 0E 01 24 24 52 41 44 60 D9 2F 04 87 6C
+%% CD A2 A4 F6 44 44 E2 D8 6B CD A2 F7 A5 85 76 61
+%% 62 09 60 4E C6 28 F2 11 F5 4D 9F A5 0F E5 A4 8C
+%% F9 C0 CF 7F 48 1C 2C 34 AB DD
 
 
-%% 00 40 15 16 00 15 15 00 00 00 4A 4B D3 61 56 F2 08 E7 A7 B1 ED FC A7 C2 2C 29 7C 54 4C C8 5D E7 96 C7 D8 EA 69 75 09 CE 5E EC 88 6D 94 9A 43 C0 5D 0A 62 5B C8 5E C3 34 B4 97 B0 34 1F B3 C7 74 62 22
-
-%% 00 40 CPL
-%% 15 CHL
-%% 16 00 SPI
-%% 15 KIC
-%% 15 KID
-%% 00 00 00 TAR
-%% 4A 4B D3 61 56 CNTR
-%% F2 PCNTR
-%% 08 E7 A7 B1 ED FC A7 C2 RC_CC_DS
-%% 2C 29 7C 54 4C C8 5D E7 96 C7 D8 EA 69 75 09 CE 5E EC 88 6D 94 9A 43 C0 5D 0A 62 5B C8 5E C3 34 B4 97 B0 34 1F B3 C7 74 62 22
-
-%% np moj numer z country codem
-%%               wygladal by tak
-%% 84 05 31 00 82 00
-%% 48 50 13 00 28 00
-
-
-
-%% 02 70 00 00 30 15 0E 19 25 25 00 00 00 01 0E 0A UNDERSTANDING.. .....
-%% 8A 0E 1B D8 0C AB B2 C3 F3 90 3D 80 EF 57 9B AE
-%% EC BE 69 41 A6 DC 0D 43 7D 55 3F E1 20 02 67 65
-%% CF 49 7D EE 5D
-
-
-%% 02 70 00 00 30 15 02 01 25 25 00 00 00 01 0E 0A  .p..0...%%......
-%% 8A 0E 00 D8 0C AB B2 C3 F3 90 3D 80 EF 57 9B AE  ..Ø.«²Ãó=ïW®
-%% EC BE 69 41 A6 DC 0D 43 7D 55 3F E1 20 02 67 65  ì¾iA¦Ü.C}U?á .ge
-%% CF 49 7D EE 5D                                   ÏI}î]
-
-
-
-%% 02 70 00 00 7E 15 06 0C 0C 44 41 52 00 00 00 00
-%% 00 04 D8 0C AB B2 C3 F3 90 3D 30 96 44 D6 C1 71
-%% DB 35 5F BE 16 AA 20 3A 2D 0D 62 AE B2 71 C9 A6
-%% 64 BF 64 70 30 B6 E0 7E 03 42 6C FD B4 44 66 E4
-%% AC F8 54 32 CC 06 E7 7E 48 94 5C 8A 17 D7 7C 02
-%% A5 C5 8E C1 8A 11 3C 8F 93 AB BE 36 4F 71 12 AB
-%% 07 A5 C4 41 5E F5 B9 51 DC EF EF 3E CA C9 58 B0
-%% 5E 23 83 69 63 93 1B ED A1 C6 AE F9 9E 28 B9 FC
-%% 15 8F
+%% ja
+%% 00 38 15 0E 01 24 24 52 41 44 A7 FD AA ED 54 0C
+%% A0 E4 88 BE 78 5C 39 5C 53 10 D2 3E 24 6A F9 34
+%% 02 BA B4 96 62 4D 16 06 CA 18 F9 F3 78 C1 55 8C
+%% 15 32 D4 FA 46 FB 7F F3 8A 56

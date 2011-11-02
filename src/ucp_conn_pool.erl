@@ -6,6 +6,8 @@
 
 %% API
 -export([start_link/0,
+         get_members/0,
+         add_member/1,
          health_check/0]).
 
 %% gen_server callbacks
@@ -18,8 +20,6 @@
 
 -define(SERVER, ?MODULE).
 -define(POOL_NAME, ucp_conn_pool).
-
-
 
 -record(state, {endpoints}).
 
@@ -40,6 +40,11 @@ start_link() ->
 health_check() ->
     gen_server:call(?SERVER, health_check).
 
+get_members() ->
+    gen_server:call(?SERVER, get_members).
+
+add_member(Pid) ->
+    gen_server:call(?SERVER, {add_member, Pid}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -75,6 +80,15 @@ init([]) ->
 %%                                   {stop, Reason, State}
 %% @end
 %%--------------------------------------------------------------------
+handle_call(get_members, _From, State) ->
+        Reply = pg2:get_local_members(?POOL_NAME),
+        {reply, Reply, State};
+
+handle_call({add_member, Pid}, _From, State) ->
+        pg2:join(?POOL_NAME, Pid),
+        Reply = ok,
+        {reply, Reply, State};
+
 handle_call(_Request, _From, State) ->
         Reply = ok,
         {reply, Reply, State}.
@@ -140,7 +154,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 connect_smsc({Name, Host, Port, Login, Password, up}) ->
    % TODO: handle errors
-   ucp_conn_sup:start_child({Host, Port, Login, Password, Name}),
+   {ok, _Pid} = ucp_conn_sup:start_child({Name, Host, Port, Login, Password}),
    ok;
 
 connect_smsc({Name, _Host, _Port, _Login, _Password, State}) ->
@@ -148,6 +162,6 @@ connect_smsc({Name, _Host, _Port, _Login, _Password, State}) ->
    ok.
 
 get_conf() ->
- [{smsc_fake_1, "127.0.0.1", 7777, "2147", "NPS2147NPS", up},
-  {smsc_fake_2, "127.0.0.1", 7777, "2147", "NPS2147NPS", up}].
+    [{smsc_fake_1, "127.0.0.1", 7777, "2147", "NPS2147NPS", up}].
+  %{smsc_fake_2, "127.0.0.1", 7777, "2147", "NPS2147NPS", up}].
 

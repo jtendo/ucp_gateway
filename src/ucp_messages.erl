@@ -199,7 +199,7 @@ create_m60(Seq, Login,  Password) ->
         ?HEADER_LEN + ?EMPTY_BODY_LEN_60,
 
     Header = #header{
-      trn=Seq,
+      trn=seq_to_string(Seq),
       len=ucp_utils:fill_with_zeros(MessageLen,5),
       o_r="O",
       ot="60"},
@@ -270,3 +270,4 @@ analyze_message(Message) ->
     Bit = unicode:bin_is_7bit(unicode:characters_to_binary(Message)),
     {'7bit', Bit}.
 
+seq_to_string(S) -> string:right(integer_to_list(S, 10), 2, $0).

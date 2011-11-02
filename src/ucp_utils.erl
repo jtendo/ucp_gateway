@@ -140,17 +140,17 @@ unpackUCP(Binary) ->
         {TRN, LEN, OR, OT, <<"A">>, SM, CRC} ->
             Header = #header{trn=TRN, len=LEN, o_r=OR, ot=OT},
             Body = #ack{ack="A", sm=SM, crc=CRC},
-            {Header, Body};
+            {ok, {Header, Body}};
         %% message 51 ACK
         {TRN, LEN, OR, OT, <<"A">>, MVP, SM, CRC} ->
             Header = #header{trn=TRN, len=LEN, o_r=OR, ot=OT},
             Body = #ack{ack="A", mvp=MVP, sm=SM, crc=CRC},
-            {Header, Body};
+            {ok, {Header, Body}};
         %% common NACK
         {TRN, LEN, OR, OT, <<"N">>, EC, SM, CRC} ->
             Header = #header{trn=TRN, len=LEN, o_r=OR, ot=OT},
             Body = #nack{nack="N", ec=EC, sm=SM,crc=CRC},
-            {Header, Body};
+            {ok, {Header, Body}};
         %% message 5X
         {TRN, LEN, OR, OT, ADC, OADC, AC, NRQ, NADC, NT, NPID,
          LRQ, LRAD, LPID, DD, DDT, VP, RPID, SCTS, DST, RSN,
@@ -164,10 +164,10 @@ unpackUCP(Binary) ->
                           mms=MMS, pr=PR, dcs=DCS, mcls=MCLS, rpi=RPI,
                           cpg=CPG, rply=RPLY, otoa=OTOA, hplmn=HPLMN,
                           xser=XSER, res4=RES4, res5=RES5, crc=CRC},
-            {Header, Body};
+            {ok, {Header, Body}};
         Other ->
             ?SYS_DEBUG("~p ~p", ["Received UNKNOWN MESSAGE",Other]),
-            {error, wrong_message}
+            {error, unknown_message}
     end.
 
 
