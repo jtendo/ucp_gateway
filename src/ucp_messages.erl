@@ -5,7 +5,7 @@
 
 -export([
          create_m51/4,
-         create_m60/3,
+         create_cmd_60/3,
          create_m31/2,
          partition_by/2,
          analyze_message/1]).
@@ -71,7 +71,7 @@ create_m51_unicode(Seq, Sender, Receiver, Message) ->
 
     XSER = "020108",
     NB = integer_to_list(length(HexMessage)*4),
-    Body = #ucp5x{
+    Body = #ucp_cmd_51{
       oadc=UCPSender,
       adc=Receiver,
       otoa=OTOA,
@@ -84,7 +84,7 @@ create_m51_unicode(Seq, Sender, Receiver, Message) ->
         length(UCPSender++Receiver++HexMessage++XSER++NB) +
         ?HEADER_LEN + ?EMPTY_BODY_LEN_51,
 
-    Header = #header{
+    Header = #ucp_header{
       trn=Seq,
       len=ucp_utils:fill_with_zeros(MessageLen,5),
       o_r="O",
@@ -108,7 +108,7 @@ create_m51_normal(Seq, Sender, Receiver, Message) ->
                ucp_utils:to_ira(Message)),
     {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
 
-    Body = #ucp5x{
+    Body = #ucp_cmd_51{
       oadc=UCPSender,
       adc=Receiver,
       otoa=OTOA,
@@ -121,7 +121,7 @@ create_m51_normal(Seq, Sender, Receiver, Message) ->
         ?EMPTY_BODY_LEN_51,
 
 
-    Header = #header{
+    Header = #ucp_header{
       trn=Seq,
       len=ucp_utils:fill_with_zeros(MessageLen,5),
       o_r="O",
@@ -145,7 +145,7 @@ create_m51_binary(Seq, Sender, Receiver, Message) ->
     UCPMsg = hex:bin_to_hexstr(Message),
     {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
 
-    Body = #ucp5x{
+    Body = #ucp_cmd_51{
       oadc=UCPSender,
       adc=Receiver,
       otoa=OTOA,
@@ -160,7 +160,7 @@ create_m51_binary(Seq, Sender, Receiver, Message) ->
         ?HEADER_LEN +
         ?EMPTY_BODY_LEN_51,
 
-    Header = #header{
+    Header = #ucp_header{
       trn=Seq,
       len=ucp_utils:fill_with_zeros(MessageLen,5),
       o_r="O",
@@ -181,12 +181,12 @@ create_m51_binary(Seq, Sender, Receiver, Message) ->
 %% @end
 %%--------------------------------------------------------------------
 
-create_m60(Seq, Login,  Password) ->
+create_cmd_60(Trn, Login,  Password) ->
     IRAPassword = hex:list_to_hexstr(ucp_utils:to_ira(Password)),
     STYP = "1",
     OTON = "6",
     ONPI = "5",
-    Body = #ucp60{
+    Body = #ucp_cmd_60{
       oadc=Login,
       oton=OTON,
       onpi=ONPI,
@@ -198,7 +198,7 @@ create_m60(Seq, Login,  Password) ->
         length(Login++STYP++OTON++ONPI) +
         ?HEADER_LEN + ?EMPTY_BODY_LEN_60,
 
-    Header = #header{
+    Header = #ucp_header{
       trn=seq_to_string(Seq),
       len=ucp_utils:fill_with_zeros(MessageLen,5),
       o_r="O",
@@ -218,13 +218,13 @@ create_m60(Seq, Login,  Password) ->
 %%--------------------------------------------------------------------
 
 create_m31(Seq, Address) ->
-    Body = #ucp31{
+    Body = #ucp_cmd_31{
       adc=Address,
       pid = "0539"},
 
     MessageLen = length(Address) + ?HEADER_LEN + ?EMPTY_BODY_LEN_31,
 
-    Header = #header{
+    Header = #ucp_header{
       trn=Seq,
       len=ucp_utils:fill_with_zeros(MessageLen,5),
       o_r="O",

@@ -1,7 +1,8 @@
 -module(ucp_utils).
 -author('rafal.galczynski@jtendo.com').
--include("../include/ucp_syntax.hrl").
--include("../include/logger.hrl").
+-author('andrzej.trawinski@jtendo.com').
+-include("ucp_syntax.hrl").
+-include("logger.hrl").
 
 -compile([debug_info]).
 
@@ -11,21 +12,17 @@
          calculate_sender/1,
          fill_with_zeros/2,
          compose_message/2,
-         unpackUCP/1,
-         analyze_ucp_body/1,
          binary_split/2,
          pad_to/2,
-         get_next_seq/1
-         %% create_ieia_00/3,
-         %% create_ieia_05/2,
-         %% create_udh/1,
-         %% create_dcs_normal/0,
-         %% create_dcs_binary/0
+         get_next_trn/1,
+         trn_to_str/1,
+         decode/1
         ]).
 
 -define(STX,16#02).
 -define(ETX,16#03).
-
+-define(MIN_MESSAGE_TRN, 0).
+-define(MAX_MESSAGE_TRN, 99).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -37,8 +34,7 @@
 %% @end
 %%--------------------------------------------------------------------
 to_ira(Str) ->
-    GsmMessage = lists:map(
-                   fun(X) -> ucp_ia5:ascii_to_gsm(X) end, Str),
+    GsmMessage = lists:map(fun(X) -> ucp_ia5:ascii_to_gsm(X) end, Str),
     lists:flatten(GsmMessage).
 
 %%--------------------------------------------------------------------
@@ -50,9 +46,7 @@ to_ira(Str) ->
 %% @spec to_7bit(String) -> String
 %% @end
 %%--------------------------------------------------------------------
-
-to_7bit(Str) ->
-    binary:bin_to_list(ucp_7bit:to_7bit(Str)).
+to_7bit(Str) -> binary:bin_to_list(ucp_7bit:to_7bit(Str)).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -63,148 +57,36 @@ to_7bit(Str) ->
 %% @spec calculate_sender(String) -> {otoa, OTOA, sender, SENDER }
 %% @end
 %%--------------------------------------------------------------------
-
 calculate_sender(Sender) ->
     case has_only_digits(Sender) of
         true ->
-            { otoa, "1139", sender, Sender};
+            {otoa, "1139", sender, Sender};
         false ->
-            { otoa, "5039", sender, append_length(
+            {otoa, "5039", sender, append_length(
                                       hex:list_to_hexstr(
                                         to_7bit(
                                           to_ira(Sender))))}
     end.
 
-%% create_ieia_00(RefNo, Total, Actual) ->
-%%     "0003" ++ hex:int_to_hexstr(RefNo) ++ hex:int_to_hexstr(Total)
-%%         ++ hex:int_to_hexstr(Actual).
-
-%% create_ieia_05(SourcePort, DestPort) ->
-%%     "0504" ++ hex:int_to_hexstr(SourcePort) ++ hex:int_to_hexstr(DestPort).
-
-%% create_udh(DDList) ->
-%%     TT = "01",
-%%     DD = lists:append(DDList),
-%%     UDHL = trunc(length(DD)/2),
-%%     LL = UDHL+1,
-%%     UDH = lists:append([
-%%                   TT,
-%%                   hex:int_to_hexstr(LL),
-%%                   hex:int_to_hexstr(UDHL),
-%%                         DD]),
-%%     UDH.
-
-%% create_dcs_binary() ->
-%%     "0201F5".
-
-%% create_dcs_normal() ->
-%%     "020100".
-
-
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Function for composing whole ucp message
-%%
-%% @spec compose_message(Header, Body) -> Bin
-%% @end
 %%--------------------------------------------------------------------
 compose_message(Header, Body) ->
-    BodyFields = lists:nthtail(1,tuple_to_list(Body)),
-    HeaderFields = lists:nthtail(1,tuple_to_list(Header)),
-    UcpMessage = lists:flatten(
-                   string:join(HeaderFields,"/") ++"/"++
-                       string:join(BodyFields,"/")),
-    CRC = calculate_crc(UcpMessage),
-    CompleteUcpMessage =  UcpMessage++CRC,
-    ?SYS_DEBUG("Sending UCPMsg: ~p",[CompleteUcpMessage]),
-    binary:list_to_bin([?STX,CompleteUcpMessage,?ETX]).
+    HF = lists:nthtail(1, tuple_to_list(Header)),
+    BF = lists:nthtail(1, tuple_to_list(Body)),
+    Len = length(string:join(lists:concat([HF, BF]), "/")) + 3, % 3:for delimiter and CRC
+    LenS = string:right(integer_to_list(Len, 10), 5, $0),
+    % Update header with proper len value
+    NewHeader = Header#ucp_header{len = LenS},
+    NHF = lists:nthtail(1, tuple_to_list(NewHeader)),
+    % Build message
+    Message = string:concat(string:join(lists:concat([NHF, BF]), "/"), "/"),
+    CRC = calculate_crc(Message),
+    string:concat(Message, CRC).
 
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Function for composing whole ucp message
-%%
-%% @spec unpackUCP(Bin) -> {Header, Body} |
-%%                                    {error, wrong_message}
-%% @end
-%%--------------------------------------------------------------------
-unpackUCP(<<>>) ->
-    {error, empty_message};
-
-unpackUCP(Binary) ->
-    Ucp = binary:bin_to_list(Binary),
-    ?SYS_DEBUG("Received UCP Frame > ~s",[string:sub_string(Ucp,2)]),
-    case list_to_tuple(re:split(Ucp,"/")) of
-        %% message 31 ACK
-        {TRN, LEN, OR, OT, <<"A">>, SM, CRC} ->
-            Header = #header{trn=TRN, len=LEN, o_r=OR, ot=OT},
-            Body = #ack{ack="A", sm=SM, crc=CRC},
-            {ok, {Header, Body}};
-        %% message 51 ACK
-        {TRN, LEN, OR, OT, <<"A">>, MVP, SM, CRC} ->
-            Header = #header{trn=TRN, len=LEN, o_r=OR, ot=OT},
-            Body = #ack{ack="A", mvp=MVP, sm=SM, crc=CRC},
-            {ok, {Header, Body}};
-        %% common NACK
-        {TRN, LEN, OR, OT, <<"N">>, EC, SM, CRC} ->
-            Header = #header{trn=TRN, len=LEN, o_r=OR, ot=OT},
-            Body = #nack{nack="N", ec=EC, sm=SM,crc=CRC},
-            {ok, {Header, Body}};
-        %% message 5X
-        {TRN, LEN, OR, OT, ADC, OADC, AC, NRQ, NADC, NT, NPID,
-         LRQ, LRAD, LPID, DD, DDT, VP, RPID, SCTS, DST, RSN,
-         DSCTS, MT, NB, MSG, MMS, PR, DCS, MCLS, RPI, CPG,
-         RPLY, OTOA, HPLMN, XSER, RES4, RES5, CRC} ->
-            Header = #header{trn=TRN, len=LEN, o_r=OR, ot=OT},
-            Body = #ucp5x{adc=ADC, oadc=OADC, ac=AC, nrq=NRQ, nadc=NADC,
-                          nt=NT, npid=NPID, lrq=LRQ, lrad=LRAD, lpid=LPID,
-                          dd=DD, ddt=DDT, vp=VP, rpid=RPID, scts=SCTS,dst=DST,
-                          rsn=RSN, dscts=DSCTS, mt=MT, nb=NB, msg=MSG,
-                          mms=MMS, pr=PR, dcs=DCS, mcls=MCLS, rpi=RPI,
-                          cpg=CPG, rply=RPLY, otoa=OTOA, hplmn=HPLMN,
-                          xser=XSER, res4=RES4, res5=RES5, crc=CRC},
-            {ok, {Header, Body}};
-        Other ->
-            ?SYS_DEBUG("~p ~p", ["Received UNKNOWN MESSAGE",Other]),
-            {error, unknown_message}
-    end.
-
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Function for analyze upc body record
-%%
-%% @spec analyze_ucp_body(Body) -> {ack,ok} |
-%%                                  {nack, system_message} |
-%%                                  {error, unknow_response}
-%% @end
-%%--------------------------------------------------------------------
-
-analyze_ucp_body(BodyRec) when is_record(BodyRec, ack) ->
-    {ack,ok};
-
-analyze_ucp_body(BodyRec) when is_record(BodyRec, nack) ->
-    {nack, BodyRec#nack.sm};
-
-analyze_ucp_body(BodyRec) when is_record(BodyRec, ucp5x) ->
-    {ucp5x, BodyRec#ucp5x.msg};
-
-analyze_ucp_body(_) ->
-    {error, unknow_response}.
-
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Function for appending list length to biggining of the list
-%%
-%% @spec append_length(List) -> []
-%% @end
 %%--------------------------------------------------------------------
-
 append_length(L) ->
     Fun = fun([H|_]) -> H == $0 end,
     {ElemsWithZero, ElemsWithOutZero} = lists:partition(Fun, L),
@@ -213,66 +95,24 @@ append_length(L) ->
     HexStr = hex:int_to_hexstr(Len),
     lists:flatten([HexStr, L]).
 
-
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Function for appending specified numer of "0" chars
-%%
-%% @spec fill_with_zeros(Value, NumerOfZeros) -> String
-%% @end
-%%--------------------------------------------------------------------
-
-fill_with_zeros(Value, Zeros) when is_list(Value)->
-    case string:len(Value) >= Zeros of
-        true ->
-            Value;
-        false ->
-            Diff = Zeros - string:len(Value),
-            string:concat(string:chars($0, Diff),Value)
-    end;
-
-fill_with_zeros(Value, Zeros) when is_integer(Value)->
-    StrZeros = integer_to_list(Zeros),
-    StrFormat = "~"++StrZeros++"."++StrZeros++".0w",
-    lists:flatten(
-      io_lib:format(StrFormat,[Value])).
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Function for getting 8 last significant bits of number
-%%
-%% @spec get_8lsb(Integer) -> Integer
-%% @end
 %%--------------------------------------------------------------------
-
 get_8lsb(Integer) ->
     Integer band 255.
 
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Function for calculating CRC checksum for UCP Message
-%%
-%% @spec calculate_crc(Message) -> HexString
-%% @end
 %%--------------------------------------------------------------------
-
 calculate_crc(UcpMessage) ->
+    string:right(integer_to_list(get_8lsb(lists:sum(Data)), 16), 2, $0),
     hex:int_to_hexstr(
       get_8lsb(
         lists:sum(UcpMessage))).
 
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Function for checking if Char is digit
-%%
-%% @spec is_digit(Char) -> true | false
-%% @end
 %%--------------------------------------------------------------------
-
 is_digit(C) when C > 46, C < 58  -> true;
 is_digit(_) -> false.
 
@@ -327,23 +167,108 @@ pad_to(Width, Binary) ->
      end.
 
 
+get_next_trn(Val) when is_list(Val) ->
+    get_next_trn(list_to_integer(Val));
+get_next_trn(Val) when is_integer(Val); Val > ?MAX_MESSAGE_TRN ->
+    ?MIN_MESSAGE_TRN;
+get_next_trn(Val) when is_integer(Val) ->
+    Val + 1.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Function returns next sequence number for given seq as string
-%%
-%% @spec get_next_seq(SeqNo) -> Str
-%% @end
-%%--------------------------------------------------------------------
-get_next_seq(SeqNo) when is_integer(SeqNo)->
-    case SeqNo =:= 99 of
-        true ->
-            "00";
-        false ->
-            fill_with_zeros(SeqNo+1,2)
+trn_to_str(Val) when is_integer(Val) ->
+    string:right(integer_to_list(Val, 10), 2, $0).
+
+%
+% UCP message decoder
+%
+decode(Msg = <<?STX, BinHeader:?UCP_HEADER_LEN/binary, _/binary>>) ->
+    Len = size(Msg) - 2,
+    <<?STX, MsgS:Len/binary, ?ETX, Rest/binary>> = Msg,
+    % TODO: handle rest of the message
+    case size(Rest) of
+        0 ->
+            ok;
+        _ ->
+            {error, multiple_messages_not_supported}
+    end,
+    lager:info("Received UCP message: ~p", [binary:bin_to_list(MsgS)]),
+    HeaderList = binary:bin_to_list(BinHeader),
+    case list_to_tuple(re:split(HeaderList, "/", [{return, list}])) of
+        {TRN, LEN, OR, OT} ->
+            Header = #ucp_header{trn = TRN, len = LEN, o_r = OR, ot = OT},
+            BodyLen = erlang:list_to_integer(LEN) - ?UCP_HEADER_LEN - ?UCP_CHECKSUM_LEN - 2,
+            case Msg of
+                <<?STX, _Header:?UCP_HEADER_LEN/binary, ?UCP_SEPARATOR,
+                BinBody:BodyLen/binary, ?UCP_SEPARATOR,
+                _CheckSum:?UCP_CHECKSUM_LEN/binary, ?ETX>> ->
+                    parse_body(Header, binary:bin_to_list(BinBody));
+                _ ->
+                    {error, invalid_message}
+            end;
+        _ ->
+            {error, invalid_header}
     end;
 
-get_next_seq(SeqNo) when is_list(SeqNo)->
-    Int = list_to_integer(SeqNo),
-    get_next_seq(Int).
+decode(_) ->
+    {error, invalid_message}.
+
+%
+% Parse operations
+%
+parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
+    case {OT, list_to_tuple(re:split(Data, "/", [{return, list}]))} of
+        {"31", {ADC, PID}} ->
+            Body = #ucp_cmd_31{adc = ADC, pid = PID},
+            {ok, {Header, Body}};
+        {"31", _} ->
+            {error, invalid_command_syntax};
+        {"60", {OADC, OTON, ONPI, STYP, PWD, NPWD, VERS, LADC, LTON, LNPI, OPID, RES1}} ->
+            Body = #ucp_cmd_60{ oadc = OADC,
+                           oton = OTON,
+                           onpi = ONPI,
+                           styp = STYP,
+                           pwd = ucp_utils:from_ira(binary:bin_to_list(hex:hexstr_to_bin(PWD))),
+                           npwd = ucp_utils:from_ira(binary:bin_to_list(hex:hexstr_to_bin(NPWD))),
+                           vers = VERS,
+                           ladc = LADC,
+                           lton = LTON,
+                           lnpi = LNPI,
+                           opid = OPID,
+                           res1 = RES1 },
+            {ok, {Header, Body}};
+        {"60", _} ->
+            {error, invalid_command_syntax};
+        {"51", {ADC, OADC, AC, NRQ, NADC, NT, NPID,
+             LRQ, LRAD, LPID, DD, DDT, VP, RPID, SCTS, DST, RSN, DSCTS,
+             MT, NB, MSG, MMS, PR, DCS, MCLS, RPI, CPG, RPLY, OTOA, HPLMN,
+             XSER, RES4, RES5}} ->
+             Body = #ucp_cmd_51{adc=ADC, oadc=OADC, ac=AC, nrq=NRQ, nadc=NADC,
+                          nt=NT, npid=NPID, lrq=LRQ, lrad=LRAD, lpid=LPID,
+                          dd=DD, ddt=DDT, vp=VP, rpid=RPID, scts=SCTS,
+                          dst=DST, rsn=RSN, dscts=DSCTS, mt=MT, nb=NB,
+                          msg=MSG, mms=MMS, pr=PR, dcs=DCS, mcls=MCLS,
+                          rpi=RPI, cpg=CPG, rply=RPLY, otoa=OTOA, hplmn=HPLMN,
+                          xser=XSER, res4=RES4, res5=RES5},
+            {ok, {Header, Body}};
+        _ ->
+            {error, unsupported_operation}
+    end;
+
+%
+% Parse results
+%
+parse_body(Header = #ucp_header{ot = OT, o_r = "R"}, Data) ->
+    case {OT, list_to_tuple(re:split(Data, "/", [{return, list}]))} of
+        {"60", {"A", SM}} ->
+            Body = #ack{ sm = SM },
+            {ok, {Header, Body}};
+        {"60", {"N", EC, SM}} ->
+            Body = #nack{ ec = EC, sm = SM },
+            {ok, {Header, Body}};
+        {"60", _} ->
+            {error, invalid_command_syntax};
+        _ ->
+            {error, unsupported_operation}
+    end;
+
+parse_body(_Header, _Body) ->
+    {error, unsupported_operation}.

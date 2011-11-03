@@ -10,6 +10,14 @@
 
 -behaviour(gen_fsm).
 
+%%%----------------------------------------------------------------------
+%%% UCP SMSC client state machine.
+%%% Possible states are:
+%%%     connecting - actually disconnected, but retrying periodically
+%%%     wait_auth_response  - connected and sent auth request
+%%%     active - bound to SMSC server and ready to handle commands
+%%%----------------------------------------------------------------------
+
 -include("ucp_syntax.hrl").
 -include("logger.hrl").
 -include("utils.hrl").
@@ -25,13 +33,11 @@
          connecting/3,
          wait_auth_response/3,
          active/3,
-         active_auth/3,
          handle_event/3,
          handle_sync_event/4,
          handle_info/3,
          terminate/3,
          code_change/4]).
-
 
 -define(SERVER, ?MODULE).
 -define(AUTH_TIMEOUT, 5000).
@@ -42,11 +48,11 @@
 -define(CONNECTION_TIMEOUT, 2000).
 %% Grace period after auth errors:
 -define(GRACEFUL_RETRY_TIMEOUT, 5000).
--define(MIN_MESSAGE_SEQ, 0).
--define(MAX_MESSAGE_SEQ, 99).
+-define(MIN_MESSAGE_TRN, 0).
+-define(MAX_MESSAGE_TRN, 99).
 
 -record(state, {
-          name, %% Name of connection
+          name,     %% Name of connection
           host,     %% smsc address
           port,     %% smsc port
           login,    %% smsc login
@@ -54,7 +60,7 @@
           socket,   %% smsc socket
           auth_timer, %% ref to auth timeout
           last_usage, %% timestamp of last socket usage
-          seq = 0,   %% message sequence number
+          trn = 0,   %% message sequence number
           reply_timeout, %% reply time of smsc
           keepalive_interval, %% interval between sending keepalive ucp31 messages
           send_interval, %% time distance between sends
@@ -110,10 +116,13 @@ close(Handle) ->
 %%--------------------------------------------------------------------
 init([Name, Host, Port, Login, Password]) ->
     {ok, SMSConnConfig} = get_config(),
-    State = #state{ name = Name, host = Host, port = Port, pass = Password,
+    State = #state{ name = Name,
+                    host = Host,
+                    port = Port,
                     login = Login,
-                    last_usage=erlang:now(),
-                    seq = 0,
+                    pass = Password,
+                    last_usage = erlang:now(),
+                    trn = 0,
                     reply_timeout = proplists:get_value(smsc_reply_timeout, SMSConnConfig, 20000),
                     keepalive_interval = proplists:get_value(smsc_keepalive_interval, SMSConnConfig, 62000),
                     default_originator = proplists:get_value(smsc_default_originator, SMSConnConfig, "2147"),
@@ -160,19 +169,18 @@ connecting(timeout, State) ->
 %% @end
 %%--------------------------------------------------------------------
 connecting(Event, From, State) ->
+    ?SYS_INFO("Received event from ~p in connecting state: ~p", [From, Event]),
     Q = queue:in({Event, From}, State#state.req_q),
     {next_state, connecting, State#state{req_q = Q}}.
 
 wait_auth_response(Event, From, State) ->
+    ?SYS_INFO("Received event from ~p in wait_auth state: ~p", [From, Event]),
     Q = queue:in({Event, From}, State#state.req_q),
     {next_state, wait_auth_response, State#state{req_q = Q}}.
 
-active_auth(Event, From, State) ->
-    Q = queue:in({Event, From}, State#state.req_q),
-    {next_state, active_auth, State#state{req_q = Q}}.
-
 active(Event, From, State) ->
-    process_message(State, Event, From).
+    ?SYS_INFO("Received event from ~p in active state: ~p", [From, Event]),
+    process_message(Event, From, State).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -188,10 +196,12 @@ active(Event, From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_event(close, _StateName, State) ->
+    ?SYS_INFO("Closing connection request"),
     catch gen_tcp:close(State#state.socket),
     {stop, normal, State};
 
-handle_event(_Event, StateName, State) ->
+handle_event(Event, StateName, State) ->
+    ?SYS_INFO("Unhandled event received in state ~p: ~p", [StateName, Event]),
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -210,8 +220,9 @@ handle_event(_Event, StateName, State) ->
 %%                   {stop, Reason, Reply, NewState}
 %% @end
 %%--------------------------------------------------------------------
-handle_sync_event(_Event, _From, StateName, State) ->
-        {reply, {StateName, State}, StateName, State}.
+handle_sync_event(Event, From, StateName, State) ->
+    ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
+    {reply, {StateName, State}, StateName, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -231,7 +242,7 @@ handle_sync_event(_Event, _From, StateName, State) ->
 %% Packets arriving in various states
 %%
 handle_info({tcp, _Socket, RawData}, connecting, State) ->
-    ?SYS_DEBUG("TCP packet received when disconnected:~n~p", [RawData]),
+    ?SYS_WARN("TCP packet received when disconnected:~n~p", [RawData]),
     {next_state, connecting, State};
 
 handle_info({tcp, _Socket, RawData}, wait_auth_response, State) ->
@@ -339,7 +350,7 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 dequeue_messages(State) ->
     case queue:out(State#state.req_q) of
         {{value, {Event, From}}, Q} ->
-            case process_message(State#state{req_q=Q}, Event, From) of
+            case process_message(Event, From, State#state{req_q=Q}) of
                 {_, active, NewState} ->
                     dequeue_messages(NewState);
                 Res ->
@@ -353,7 +364,7 @@ process_message(State, Event, From) ->
     case send_message(Event, From, State) of
         {ok, NewState} ->
             case Event of
-                {bind, _, _} ->
+                {auth, _, _} ->
                     {next_state, active_auth, NewState};
                 _ ->
                     {next_state, active, NewState}
@@ -390,9 +401,9 @@ report_auth_failure(State, Reason) ->
     ?SYS_WARN("SMSC authentication failed on ~s: ~p", [State#state.name, Reason]).
 
 auth_request(State) ->
-    Seq = get_next_seq(State),
-    {ok, UcpMessage} = ucp_messages:create_m60(Seq, State#state.login, State#state.pass),
-    send_message(State#state{seq = Seq}, UcpMessage).
+    TRN = get_next_trn(State),
+    {ok, UcpMessage} = ucp_messages:create_m60(TRN, State#state.login, State#state.pass),
+    send_message(State#state{trn = TRN}, UcpMessage).
 
 send_message(_Event, _From, _State) ->
     ok.
@@ -410,16 +421,12 @@ send_message(State, Message) ->
             %ok
     %end,
     ?SYS_DEBUG("Sending message: ~p", [Message]),
-    %case (S#eldap.sockmod):send(S#eldap.fd, Bytes) of
-        %ok ->
-            %Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, Id}),
-            %New_dict = dict:store(Id, [{Timer, Command, From, Name}], S#eldap.dict),
-            %{ok, S#eldap{id = Id, dict = New_dict}};
-        %Error ->
-            %Error
-    %end.
     case gen_tcp:send(State#state.socket, Message) of
         ok -> {ok, State};
+            Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, Id}),
+            New_dict = dict:store(Id, [{Timer, Message, "From", "Name"}], S#eldap.dict),
+            %New_dict = dict:store(Id, [{Timer, Command, From, Name}], S#eldap.dict),
+            {ok, State#state{trn = TRN, dict = New_dict}};
         Error -> Error
     end.
 
@@ -559,30 +566,26 @@ close_and_retry(State) ->
 %% Deals with incoming packets in the wait_auth_response state
 %% Will return one of:
 %%  ok - Success - move to active state
-%%  {fail_bind, Reason} - Failed
+%%  {auth_failed, Reason} - Failed
 %%  {error, Reason}
 %%  {'EXIT', Reason} - Broken packet
 %%-----------------------------------------------------------------------
 recvd_wait_auth_response(Data, State) ->
-    analyze_ucp_message(Data),
-    ok.
-    %case asn1rt:decode('ELDAPv3', 'LDAPMessage', Pkt) of
-        %{ok,Msg} ->
-            %?SYS_DEBUG("LDAP bind response:~n~p", [Msg]),
-            %check_id(S#eldap.id, Msg#'LDAPMessage'.messageID),
-            %case Msg#'LDAPMessage'.protocolOp of
-                %{bindResponse, Result} ->
-                    %case Result#'BindResponse'.resultCode of
-                        %success -> bound;
-                        %Error   -> {fail_bind, Error}
-                    %end
-            %end;
-        %Else ->
-            %{fail_bind, Else}
-    %end.
+    case ucp_utils:decode_message(Data) of
+        {ok, {Header, Body}} ->
+             check_trn(Header#ucp_header.trn, State#state.trn),
+             check_auth_result(Body);
+        Else ->
+             {auth_failed, Else}
+    end.
 
-check_id(Id, Id) -> ok;
-check_id(_, _)   -> throw({error, wrong_auth_id}).
+check_auth_result(Result) when is_record(Result, ack) ->
+    auth_ok;
+check_auth_result(Result) when is_record(Result, nack) ->
+    {auth_failed, Result#nack.sm}.
+
+check_trn(TRN, TRN) -> ok;
+check_trn(_, _)   -> throw({error, wrong_auth_trn}).
 
 ucp_decode(Data) ->
     [UcpMessage|_] = binary:split(Data, [<<3>>], [global]),
@@ -684,8 +687,8 @@ check_reply(_Other, _From) ->
     %ok;
 %check_bind_reply(#'BindResponse'{resultCode = Reason}, _From) ->
     %{error, Reason};
-check_bind_reply(_Other, _From) ->
-    ok.
+%check_bind_reply(_Other, _From) ->
+%    ok.
     %{error, Other}.
 
 %%-----------------------------------------------------------------------
