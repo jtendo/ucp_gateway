@@ -1,12 +1,14 @@
 -module(ucp_messages).
 -author('rafal.galczynski@jtendo.com').
+-author('andrzej.trawinski@jtendo.com').
 
--include("../include/ucp_syntax.hrl").
+-include("ucp_syntax.hrl").
 
 -export([
          create_m51/4,
          create_cmd_60/3,
-         create_m31/2,
+         create_cmd_31/2,
+         create_ack/1,
          partition_by/2,
          analyze_message/1]).
 
@@ -71,7 +73,7 @@ create_m51_unicode(Seq, Sender, Receiver, Message) ->
 
     XSER = "020108",
     NB = integer_to_list(length(HexMessage)*4),
-    Body = #ucp_cmd_51{
+    Body = #ucp_cmd_5x{
       oadc=UCPSender,
       adc=Receiver,
       otoa=OTOA,
@@ -108,7 +110,7 @@ create_m51_normal(Seq, Sender, Receiver, Message) ->
                ucp_utils:to_ira(Message)),
     {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
 
-    Body = #ucp_cmd_51{
+    Body = #ucp_cmd_5x{
       oadc=UCPSender,
       adc=Receiver,
       otoa=OTOA,
@@ -145,7 +147,7 @@ create_m51_binary(Seq, Sender, Receiver, Message) ->
     UCPMsg = hex:bin_to_hexstr(Message),
     {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
 
-    Body = #ucp_cmd_51{
+    Body = #ucp_cmd_5x{
       oadc=UCPSender,
       adc=Receiver,
       otoa=OTOA,
@@ -183,56 +185,36 @@ create_m51_binary(Seq, Sender, Receiver, Message) ->
 
 create_cmd_60(Trn, Login,  Password) ->
     IRAPassword = hex:list_to_hexstr(ucp_utils:to_ira(Password)),
-    STYP = "1",
-    OTON = "6",
-    ONPI = "5",
     Body = #ucp_cmd_60{
-      oadc=Login,
-      oton=OTON,
-      onpi=ONPI,
-      styp=STYP,
-      pwd = IRAPassword,
-      vers = "0100"},
-
-    MessageLen = length(IRAPassword)*2 +
-        length(Login++STYP++OTON++ONPI) +
-        ?HEADER_LEN + ?EMPTY_BODY_LEN_60,
-
+              oadc = Login,
+              oton = "6",
+              onpi = "5",
+              styp = "1",
+              pwd = IRAPassword,
+              vers = "0100"},
     Header = #ucp_header{
-      trn=seq_to_string(Seq),
-      len=ucp_utils:fill_with_zeros(MessageLen,5),
-      o_r="O",
-      ot="60"},
-
-    UcpMessage = ucp_utils:compose_message(Header, Body),
-    {ok, UcpMessage}.
+                  trn = ucp_utils:trn_to_str(Trn),
+                  o_r = "O",
+                  ot = "60"},
+    {ok, ucp_utils:compose_message(Header, Body)}.
 
 
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Function try to create UCP 31 Alert / used as keep alive
-%%
-%% @spec create_m31(Seq, Address) -> {ok, UcpMsg}
-%% @end
 %%--------------------------------------------------------------------
-
-create_m31(Seq, Address) ->
+create_cmd_31(Trn, Address) ->
     Body = #ucp_cmd_31{
-      adc=Address,
-      pid = "0539"},
-
-    MessageLen = length(Address) + ?HEADER_LEN + ?EMPTY_BODY_LEN_31,
-
+              adc = Address,
+              pid = "0539"},
     Header = #ucp_header{
-      trn=Seq,
-      len=ucp_utils:fill_with_zeros(MessageLen,5),
-      o_r="O",
-      ot="31"},
+                  trn = ucp_utils:trn_to_str(Trn),
+                  o_r = "O",
+                  ot = "31"},
+    {ok, ucp_utils:compose_message(Header, Body)}.
 
-    UcpMessage = ucp_utils:compose_message(Header, Body),
-    {ok, UcpMessage}.
 
+create_ack(Header) when is_record(Header, ucp_header) ->
+    {ok, ucp_utils:compose_message(Header#ucp_header{o_r = "R"}, #ack{})}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -270,4 +252,3 @@ analyze_message(Message) ->
     Bit = unicode:bin_is_7bit(unicode:characters_to_binary(Message)),
     {'7bit', Bit}.
 
-seq_to_string(S) -> string:right(integer_to_list(S, 10), 2, $0).
