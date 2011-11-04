@@ -118,7 +118,8 @@ close(Handle) ->
 %% @end
 %%--------------------------------------------------------------------
 init([Name, Host, Port, Login, Password]) ->
-    {ok, SMSConnConfig} = get_config(),
+    confetti:use(ucp_conf),
+    SMSConnConfig = confetti:fetch(ucp_conf),
     State = #state{ name = Name,
                     host = Host,
                     port = Port,
@@ -456,16 +457,6 @@ send_message(Event = {_Type, Message}, From, State) ->
                       %send_message(State, Message, ReqId)
               %end, Messages),
     %{reply, ok, State#state{seq=erlang:list_to_integer(Seq) + length(Messages)}};
-
-% TODO: replace with real configuration
-get_config() ->
-    SMSConnConfig = [
-        {smsc_reply_timeout, 20000},
-        {smsc_default_originator, "orange.pl"},
-        {smsc_keepalive_time, 60000},
-        {smsc_reconnect_time, 20000},
-        {smsc_send_interval, 200}],
-    {ok, SMSConnConfig}.
 
 cancel_timer(Timer) ->
     erlang:cancel_timer(Timer),
