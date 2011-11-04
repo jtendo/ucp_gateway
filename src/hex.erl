@@ -13,10 +13,13 @@ list_to_hexstr(X) -> to_hexstr(X).
 to_hexstr(Bin) when is_binary(Bin) ->
     [to_hexstr(X) || X <- binary_to_list(Bin)];
 
-to_hexstr(Int) when is_integer(Int) ->
+to_hexstr(Int) when is_integer(Int) andalso Int =< 255 ->
     string:right(integer_to_list(Int, 16), 2, $0);
 
+to_hexstr(Int) when is_integer(Int) ->
+    string:right(integer_to_list(Int, 16), 4, $0);
+
 to_hexstr(L) when is_list(L) ->
-    lists:flatten([to_hexstr(X) || X <- L]).
+    [to_hexstr(X) || X <- L].
 
 % list_to_integer("F", 16).
