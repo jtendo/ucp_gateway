@@ -7,7 +7,7 @@
 %% API
 -export([start_link/0,
          get_members/0,
-         add_member/1,
+         join_pool/0,
          health_check/0]).
 
 %% gen_server callbacks
@@ -43,8 +43,8 @@ health_check() ->
 get_members() ->
     gen_server:call(?SERVER, get_members).
 
-add_member(Pid) ->
-    gen_server:call(?SERVER, {add_member, Pid}).
+join_pool() ->
+    gen_server:call(?SERVER, {join_pool}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -81,17 +81,20 @@ init([]) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_call(get_members, _From, State) ->
-        Reply = pg2:get_local_members(?POOL_NAME),
-        {reply, Reply, State};
+    Reply = pg2:get_local_members(?POOL_NAME),
+    {reply, Reply, State};
 
-handle_call({add_member, Pid}, _From, State) ->
-        pg2:join(?POOL_NAME, Pid),
-        Reply = ok,
-        {reply, Reply, State};
+handle_call({join_pool}, {Pid, _}, State) ->
+    case lists:member(Pid, pg2:get_local_members(?POOL_NAME)) of
+        true -> ok;
+        false ->
+            pg2:join(?POOL_NAME, Pid)
+    end,
+    {reply, ok, State};
 
 handle_call(_Request, _From, State) ->
-        Reply = ok,
-        {reply, Reply, State}.
+    Reply = ok,
+    {reply, Reply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -104,7 +107,7 @@ handle_call(_Request, _From, State) ->
 %% @end
 %%--------------------------------------------------------------------
 handle_cast(_Msg, State) ->
-        {noreply, State}.
+    {noreply, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -135,7 +138,7 @@ handle_info(_Info, State) ->
 %% @end
 %%--------------------------------------------------------------------
 terminate(_Reason, _State) ->
-        ok.
+    ok.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -146,7 +149,7 @@ terminate(_Reason, _State) ->
 %% @end
 %%--------------------------------------------------------------------
 code_change(_OldVsn, State, _Extra) ->
-        {ok, State}.
+    {ok, State}.
 
 %%%===================================================================
 %%% Internal functions

@@ -151,7 +151,7 @@ init([Name, Host, Port, Login, Password]) ->
 %%--------------------------------------------------------------------
 connecting(timeout, State) ->
     lager:info("Timeout 0!"),
-    ucp_conn_pool:add_member(self()),
+    ucp_conn_pool:join_pool(),
     {ok, NextState, NewState} = connect(State),
     {next_state, NextState, NewState}.
 
