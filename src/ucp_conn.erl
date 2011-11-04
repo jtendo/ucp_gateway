@@ -135,45 +135,13 @@ init([Name, Host, Port, Login, Password]) ->
                     req_q = queue:new()},
     {ok, connecting, State, 0}. % Start connecting after timeout
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% There should be one instance of this function for each possible
-%% state name. Whenever a gen_fsm receives an event sent using
-%% gen_fsm:send_event/2, the instance of this function with the same
-%% name as the current state name StateName is called to handle
-%% the event. It is also called if a timeout occurs.
-%%
-%% @spec state_name(Event, State) ->
-%%                   {next_state, NextStateName, NextState} |
-%%                   {next_state, NextStateName, NextState, Timeout} |
-%%                   {stop, Reason, NewState}
-%% @end
-%%--------------------------------------------------------------------
+
 connecting(timeout, State) ->
-    lager:info("Timeout 0!"),
+    ?SYS_INFO("Timeout 0!", []),
     ucp_conn_pool:join_pool(),
     {ok, NextState, NewState} = connect(State),
     {next_state, NextState, NewState}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% There should be one instance of this function for each possible
-%% state name. Whenever a gen_fsm receives an event sent using
-%% gen_fsm:sync_send_event/[2,3], the instance of this function with
-%% the same name as the current state name StateName is called to
-%% handle the event.
-%%
-%% @spec state_name(Event, From, State) ->
-%%                   {next_state, NextStateName, NextState} |
-%%                   {next_state, NextStateName, NextState, Timeout} |
-%%                   {reply, Reply, NextStateName, NextState} |
-%%                   {reply, Reply, NextStateName, NextState, Timeout} |
-%%                   {stop, Reason, NewState} |
-%%                   {stop, Reason, Reply, NewState}
-%% @end
-%%--------------------------------------------------------------------
 connecting(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in connecting state: ~p", [From, Event]),
     Q = queue:in({Event, From}, State#state.req_q),
@@ -188,19 +156,6 @@ active(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in active state: ~p", [From, Event]),
     process_message(Event, From, State).
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a gen_fsm receives an event sent using
-%% gen_fsm:send_all_state_event/2, this function is called to handle
-%% the event.
-%%
-%% @spec handle_event(Event, StateName, State) ->
-%%                   {next_state, NextStateName, NextState} |
-%%                   {next_state, NextStateName, NextState, Timeout} |
-%%                   {stop, Reason, NewState}
-%% @end
-%%--------------------------------------------------------------------
 handle_event(close, _StateName, State) ->
     ?SYS_INFO("Closing connection request", []),
     catch gen_tcp:close(State#state.socket),
@@ -210,39 +165,9 @@ handle_event(Event, StateName, State) ->
     ?SYS_INFO("Unhandled event received in state ~p: ~p", [StateName, Event]),
     {next_state, StateName, State}.
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a gen_fsm receives an event sent using
-%% gen_fsm:sync_send_all_state_event/[2,3], this function is called
-%% to handle the event.
-%%
-%% @spec handle_sync_event(Event, From, StateName, State) ->
-%%                   {next_state, NextStateName, NextState} |
-%%                   {next_state, NextStateName, NextState, Timeout} |
-%%                   {reply, Reply, NextStateName, NextState} |
-%%                   {reply, Reply, NextStateName, NextState, Timeout} |
-%%                   {stop, Reason, NewState} |
-%%                   {stop, Reason, Reply, NewState}
-%% @end
-%%--------------------------------------------------------------------
 handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
     {reply, {StateName, State}, StateName, State}.
-
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% This function is called by a gen_fsm when it receives any
-%% message other than a synchronous or asynchronous event
-%% (or a system message).
-%%
-%% @spec handle_info(Info,StateName,State)->
-%%                   {next_state, NextStateName, NextState} |
-%%                   {next_state, NextStateName, NextState, Timeout} |
-%%                   {stop, Reason, NewState}
-%% @end
-%%--------------------------------------------------------------------
 
 %%
 %% Packets arriving in various states
@@ -257,7 +182,7 @@ handle_info({tcp, _Socket, RawData}, wait_auth_response, State) ->
     case catch received_wait_auth_response(RawData, State) of
         ok ->
             {Action, NextState, NewState} = dequeue_messages(State),
-            lager:info("Starting keepalive timer"),
+            ?SYS_INFO("Starting keepalive timer", []),
             Timer = erlang:start_timer(NewState#state.keepalive_interval, self(), keepalive_timeout),
             {Action, NextState, NewState#state{keepalive_timer = Timer}};
         {auth_failed, Reason} ->
@@ -298,7 +223,7 @@ handle_info({tcp_error, _Socket, Reason}, StateName, State) ->
 %% Handling timers timeouts
 %%--------------------------------------------------------------------
 handle_info({timeout, Timer, {cmd_timeout, Id}}, StateName, S) ->
-    lager:info("Timeout 1"),
+    ?SYS_WARN("Timeout 1", []),
     case cmd_timeout(Timer, Id, S) of
         {reply, To, Reason, NewS} -> gen_fsm:reply(To, Reason),
                                      {next_state, StateName, NewS};
@@ -306,7 +231,7 @@ handle_info({timeout, Timer, {cmd_timeout, Id}}, StateName, S) ->
     end;
 
 handle_info({timeout, retry_connect}, connecting, State) ->
-    lager:info("retry_connect timeout!"),
+    ?SYS_WARN("retry_connect timeout!", []),
     {ok, NextState, NewState} = connect(State),
     {next_state, NextState, NewState};
 
@@ -314,17 +239,17 @@ handle_info({timeout, retry_connect}, connecting, State) ->
 %% Handle autorization timeout = retry connection
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, auth_timeout}, wait_auth_response, State) ->
-    lager:info("auth timeout!"),
+    ?SYS_WARN("auth timeout!", []),
     {next_state, connecting, close_and_retry(State)};
 
 %%--------------------------------------------------------------------
 %% Handle keep-alive timer timeout = send keep-alive message to SMSC
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
-    lager:info("keepalive timeout!!"),
+    ?SYS_WARN("keepalive timeout!!", []),
     TRN = ucp_utils:get_next_trn(State#state.trn),
     {ok, Message} = ucp_messages:create_cmd_31(TRN, State#state.login),
-    lager:info("Sending keep-alive message: ~p", [Message]),
+    ?SYS_INFO("Sending keep-alive message: ~p", [Message]),
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)),
     Timer = erlang:start_timer(State#state.keepalive_interval, self(), keepalive_timeout),
     {next_state, active, State#state{keepalive_timer = Timer, trn = TRN}};
@@ -333,7 +258,7 @@ handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
 %% Cancel keepalive timer when not in active state
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
-    lager:info("Canceling keepalive timer"),
+    ?SYS_INFO("Canceling keepalive timer", []),
     cancel_timer(State#state.keepalive_timer),
     {next_state, StateName, State};
 
@@ -341,7 +266,7 @@ handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
 %% Empty process message queue from the rubbish
 %%--------------------------------------------------------------------
 handle_info(Info, StateName, State) ->
-    lager:info("Unexpected Info: ~p~nIn state: ~p~n when StateData is: ~p", [Info, StateName, State]),
+    ?SYS_WARN("Unexpected Info: ~p~nIn state: ~p~n when StateData is: ~p", [Info, StateName, State]),
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -365,7 +290,7 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 dequeue_messages(State) ->
-    lager:info("Dequeing messages..."),
+    ?SYS_INFO("Dequeing messages...", []),
     case queue:out(State#state.req_q) of
         {{value, {Event, From}}, Q} ->
             case process_message(Event, From, State#state{req_q=Q}) of
@@ -379,7 +304,7 @@ dequeue_messages(State) ->
     end.
 
 process_message(Event, From, State) ->
-    lager:info("Processing message: ~p", [Event]),
+    ?SYS_INFO("Processing message: ~p", [Event]),
     case send_message(Event, From, State) of
         {ok, NewState} ->
             {next_state, active, NewState};
@@ -527,7 +452,7 @@ received_active(Data, State) ->
         _Else ->
             % Decoding failed = ignore message
             %TODO: Make sure is't OK?
-            lager:info("Unknown data: ~p", [Data]),
+            ?SYS_INFO("Unknown data: ~p", [Data]),
             {ok, State}
     end.
 
@@ -537,9 +462,9 @@ process_message({#ucp_header{ot = "31", o_r = "R"}, _Body}, State) ->
 
 process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     % respond with ACK
-    lager:info("Received message: ~p", [Body]),
+    ?SYS_INFO("Received message: ~p", [Body]),
     {ok, Message} = ucp_messages:create_ack(Header),
-    lager:info("Sending ACK message: ~p", [Message]),
+    ?SYS_INFO("Sending ACK message: ~p", [Message]),
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)),
     %TODO: Check sending result = Don't know what to do when error!!
     {ok, State}.

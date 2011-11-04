@@ -179,7 +179,7 @@ decode_message(Msg = <<?STX, BinHeader:?UCP_HEADER_LEN/binary, _/binary>>) ->
     % TODO: handle rest of the message
     case size(Rest) of
         0 ->
-            lager:info("Received UCP message: ~p", [binary:bin_to_list(MsgS)]),
+            ?SYS_INFO("Received UCP message: ~p", [binary:bin_to_list(MsgS)]),
             HeaderList = binary:bin_to_list(BinHeader),
             case list_to_tuple(re:split(HeaderList, "/", [{return, list}])) of
                 {TRN, LEN, OR, OT} ->
