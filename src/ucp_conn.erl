@@ -25,6 +25,7 @@
 %% API
 -export([start_link/1,
          get_status/1,
+         get_name/1,
          close/1]).
 
 %% gen_fsm callbacks
@@ -93,6 +94,12 @@ start_link({Name, Host, Port, Login, Password}) ->
 %%% --------------------------------------------------------------------
 get_status(Handle) ->
     gen_fsm:sync_send_all_state_event(Handle, get_status).
+
+%%% --------------------------------------------------------------------
+%%% Get connection name.
+%%% --------------------------------------------------------------------
+get_name(Handle) ->
+    gen_fsm:sync_send_all_state_event(Handle, get_name).
 
 %%% --------------------------------------------------------------------
 %%% Shutdown connection (and process) asynchronous.
@@ -164,6 +171,9 @@ handle_event(close, _StateName, State) ->
 handle_event(Event, StateName, State) ->
     ?SYS_INFO("Unhandled event received in state ~p: ~p", [StateName, Event]),
     {next_state, StateName, State}.
+
+handle_sync_event(get_name, _From, StateName, State) ->
+    {reply, {name, State#state.name}, StateName, State};
 
 handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
