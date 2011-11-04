@@ -15,7 +15,7 @@ start(_StartType, _StartArgs) ->
 % For application start from console
 start() ->
     %application:start(lager),
-    application:start(ucp_gateway).
+    ok = application:start(ucp_gateway).
 
 stop(_State) ->
         ok.
