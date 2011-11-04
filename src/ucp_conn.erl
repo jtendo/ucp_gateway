@@ -173,6 +173,9 @@ handle_info({tcp, _Socket, RawData}, wait_auth_response, State) ->
     cancel_timer(State#state.auth_timer),
     case catch received_wait_auth_response(RawData, State) of
         ok ->
+            % cancel keepalive timer if still alive
+            cancel_timer(State#state.keepalive_timer),
+            % process queued messages
             {Action, NextState, NewState} = dequeue_messages(State),
             ?SYS_INFO("Starting keepalive timer", []),
             Timer = erlang:start_timer(NewState#state.keepalive_interval, self(), keepalive_timeout),
@@ -378,8 +381,11 @@ create_bin_message(Receiver, [Bin|Tail], State, Result) ->
     create_bin_message(Receiver, Tail, State#state{trn = TRN}, [{TRN, Msg}|Result]).
 
 
+cancel_timer(undefined) ->
+    ok;
 cancel_timer(Timer) ->
-    erlang:cancel_timer(Timer),
+    Value = erlang:cancel_timer(Timer),
+    lager:debug("Timer ~p canceled with value: ~p", [Timer, Value]),
     receive
         {timeout, Timer, _} ->
             ok
