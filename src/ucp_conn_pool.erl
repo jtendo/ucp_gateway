@@ -63,7 +63,8 @@ join_pool() ->
 %%--------------------------------------------------------------------
 init([]) ->
     pg2:create(?POOL_NAME),
-    Conns = get_conf(),
+    confetti:use(ucp_pool_conf),
+    Conns = confetti:fetch(ucp_pool_conf),
     {ok, #state{endpoints = Conns}, 0}.
 
 %%--------------------------------------------------------------------
@@ -163,8 +164,4 @@ connect_smsc({Name, Host, Port, Login, Password, up}) ->
 connect_smsc({Name, _Host, _Port, _Login, _Password, State}) ->
    ?SYS_DEBUG("Connection ~p excluded from starting, due to its status: ~p", [Name, State]),
    ok.
-
-get_conf() ->
-    [{smsc_fake_1, "127.0.0.1", 7777, "2147", "NPS2147NPS", up}].
-  %{smsc_fake_2, "127.0.0.1", 7777, "2147", "NPS2147NPS", up}].
 
