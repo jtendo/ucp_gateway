@@ -263,12 +263,11 @@ handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
 %%--------------------------------------------------------------------
 handle_info(Info, StateName, State) ->
     ?SYS_WARN("Unexpected Info: ~p~nIn state: ~p~n when StateData is: ~p", [Info, StateName, State]),
-    {next_state, StateName, State}.
+    {next_state, StateName, State};
 
 %%--------------------------------------------------------------------
 %% Handle configuration change
 %%--------------------------------------------------------------------
-
 handle_info({config_reloaded, Conf}, StateName, State) ->
     ?SYS_INFO("UCP Connection process ~p (~p) received configuration reload
         notification", [State#state.name, self()]),
@@ -279,7 +278,6 @@ handle_info({config_reloaded, Conf}, StateName, State) ->
         send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000"),
     },
     {next_state, StateName, State}.
-
 
 %%--------------------------------------------------------------------
 %% This function is called by a gen_fsm when it is about to
