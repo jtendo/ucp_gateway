@@ -75,12 +75,11 @@ handle_info(timeout, #state{endpoints = Endpoints} = State) ->
 handle_info({config_reloaded, Conf}, State) ->
     ?SYS_INFO("UCP Connection pool received configuration change
         notification...", []),
-    case find_orphans(Conf) of
+    case find_connections_to_kill(Conf) of
         [] ->
-            ?SYS_DEBUG("No orphaned connections found...", []);
+            ?SYS_DEBUG("No unused connections found...", []);
         Orphans when is_list(Orphans) ->
-            ?SYS_INFO("Found orphaned connections: ~p. Kill attempts in
-                progress.", [Orphans]),
+            ?SYS_INFO("Found unused connections: ~p", [Orphans]),
             lists:foreach(fun({Pid, Name}) ->
                         Res = ucp_conn:close(Pid),
                         ?SYS_INFO("Killing ~p... ~p", [{Pid,Name}, Res])
@@ -113,20 +112,20 @@ connect_smsc({Name, _Host, _Port, _Login, _Password, State}) ->
 get_members_internal() ->
     pg2:get_local_members(?POOL_NAME).
 
-find_orphans(Conf) ->
+find_connections_to_kill(Conf) ->
     %% get alive connections, at least according to the pg2 pool
     ConnsAlive = lists:map(fun(Pid) ->
                         {Pid, ucp_conn:get_name(Pid)}
                  end, get_members_internal()),
     %% get raw connection names from configuration
-    ConfNames = lists:map(fun(C) ->
-                            {N,_,_,_,_,_} = C,
-                            N
-                          end, Conf),
+    ConfNames = lists:map(fun(C) -> {N,_,_,_,_,_} = C, N end, Conf),
+    %% get raw connection names that are explicitly told to be shut down
+    ConfsToShutdown = [ N || {N,_,_,_,_,Status} <- Conf, Status =:= down ],
     ?SYS_DEBUG("Connection names configured: ~p", [ConfNames]),
-    %% filter out connections that are not configured
-    Result = lists:filter(fun({_, {name, Name}}) ->
+    %% filter out connections that are not configured or need to be shut down
+    Convicts = lists:filter(fun({_, {name, Name}}) ->
         not lists:member(Name, ConfNames)
+        or lists:member(Name, ConfsToShutdown)
     end, ConnsAlive),
-    ?SYS_DEBUG("Orphans: ~p", [Result]),
-    Result.
+    ?SYS_DEBUG("Convicted connections: ~p", [Convicts]),
+    Convicts.
