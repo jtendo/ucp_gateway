@@ -259,13 +259,6 @@ handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
     {next_state, StateName, State};
 
 %%--------------------------------------------------------------------
-%% Empty process message queue from the rubbish
-%%--------------------------------------------------------------------
-handle_info(Info, StateName, State) ->
-    ?SYS_WARN("Unexpected Info: ~p~nIn state: ~p~n when StateData is: ~p", [Info, StateName, State]),
-    {next_state, StateName, State};
-
-%%--------------------------------------------------------------------
 %% Handle configuration change
 %%--------------------------------------------------------------------
 handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
@@ -277,6 +270,13 @@ handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
         default_originator = proplists:get_value(smsc_default_originator, SMSConnConfig, "2147"),
         send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000")
     },
+    {next_state, StateName, NewState};
+
+%%--------------------------------------------------------------------
+%% Empty process message queue from the rubbish
+%%--------------------------------------------------------------------
+handle_info(Info, StateName, State) ->
+    ?SYS_WARN("Unexpected Info: ~p~nIn state: ~p~n when StateData is: ~p", [Info, StateName, State]),
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
