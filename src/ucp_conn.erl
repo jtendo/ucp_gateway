@@ -275,7 +275,7 @@ handle_info({config_reloaded, Conf}, StateName, State) ->
         reply_timeout = proplists:get_value(smsc_reply_timeout, SMSConnConfig, 20000),
         keepalive_interval = proplists:get_value(smsc_keepalive_interval, SMSConnConfig, 62000),
         default_originator = proplists:get_value(smsc_default_originator, SMSConnConfig, "2147"),
-        send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000"),
+        send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000")
     },
     {next_state, StateName, State}.
 
