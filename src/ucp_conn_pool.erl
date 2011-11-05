@@ -76,6 +76,8 @@ handle_info(timeout, #state{endpoints = Endpoints} = State) ->
     {noreply, State};
 
 handle_info({config_reloaded, Conf}, State) ->
+    %% TODO - find also connections that have changed, so they'll be
+    %% convicts & newborns at a time
     ?SYS_INFO("UCP Connection pool received configuration change
         notification...", []),
     ?SYS_DEBUG("New configuration: ~p", [Conf]),
