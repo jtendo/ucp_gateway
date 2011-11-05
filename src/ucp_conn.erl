@@ -280,6 +280,22 @@ handle_info(Info, StateName, State) ->
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
+%% Handle configuration change
+%%--------------------------------------------------------------------
+
+handle_info({config_reloaded, Conf}, StateName, State) ->
+    ?SYS_INFO("UCP Connection process ~p (~p) received configuration reload
+        notification", [State#state.name, self()]),
+    NewState = State#state{
+        reply_timeout = proplists:get_value(smsc_reply_timeout, SMSConnConfig, 20000),
+        keepalive_interval = proplists:get_value(smsc_keepalive_interval, SMSConnConfig, 62000),
+        default_originator = proplists:get_value(smsc_default_originator, SMSConnConfig, "2147"),
+        send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000"),
+    },
+    {next_state, StateName, State}.
+
+
+%%--------------------------------------------------------------------
 %% This function is called by a gen_fsm when it is about to
 %% terminate. It should be the opposite of Module:init/1 and do any
 %% necessary cleaning up. When it returns, the gen_fsm terminates with
@@ -293,7 +309,7 @@ terminate(_Reason, _StateName, _State) ->
 %% Convert process state when code is changed
 %%--------------------------------------------------------------------
 code_change(_OldVsn, StateName, State, _Extra) ->
-        {ok, StateName, State}.
+    {ok, StateName, State}.
 
 
 %%%===================================================================
