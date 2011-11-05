@@ -75,15 +75,26 @@ handle_info(timeout, #state{endpoints = Endpoints} = State) ->
 handle_info({config_reloaded, Conf}, State) ->
     ?SYS_INFO("UCP Connection pool received configuration change
         notification...", []),
-    case find_connections_to_kill(Conf) of
+    ?SYS_DEBUG("New configuration: ~p", [Conf]),
+    {ok, {Convicts, Newborns}} = qualify_conns_destiny(Conf),
+    case Convicts of
         [] ->
             ?SYS_DEBUG("No unused connections found...", []);
-        Orphans when is_list(Orphans) ->
-            ?SYS_INFO("Found unused connections: ~p", [Orphans]),
+        ConvictConns when is_list(ConvictConns) ->
+            ?SYS_INFO("Found unused connections: ~p", [ConvictConns]),
             lists:foreach(fun({Pid, Name}) ->
                         Res = ucp_conn:close(Pid),
                         ?SYS_INFO("Killing ~p... ~p", [{Pid,Name}, Res])
-                end, Orphans)
+                end, ConvictConns)
+    end,
+    case Newborns of
+        [] ->
+            ?SYS_DEBUG("No new connections to estabilish...", []);
+        NewbornConns when is_list(NewbornConns) ->
+            ?SYS_INFO("Found new connections to estabilish: ~p",
+                [NewbornConns]),
+            lists:foreach(fun(ConnData) -> connect_smsc(ConnData) end,
+                NewbornConns)
     end,
     {noreply, State};
 
@@ -112,13 +123,10 @@ connect_smsc({Name, _Host, _Port, _Login, _Password, State}) ->
 get_members_internal() ->
     pg2:get_local_members(?POOL_NAME).
 
-find_connections_to_kill(Conf) ->
-    %% get alive connections, at least according to the pg2 pool
-    ConnsAlive = lists:map(fun(Pid) ->
-                        {Pid, ucp_conn:get_name(Pid)}
-                 end, get_members_internal()),
+find_convicts(ConnsAlive, Conf) ->
     %% get raw connection names from configuration
-    ConfNames = [ N || {N,_,_,_,_,_,_} <- Conf ],
+    ConfNames = [ N || {N,_,_,_,_,_} <- Conf ],
+    ?SYS_DEBUG("All configured connections: ~p", [ConfNames]),
     %% get raw connection names that are explicitly told to be shut down
     ConfsToShutdown = [ N || {N,_,_,_,_,Status} <- Conf, Status =:= down ],
     ?SYS_DEBUG("Connection names configured: ~p", [ConfNames]),
@@ -129,3 +137,22 @@ find_connections_to_kill(Conf) ->
     end, ConnsAlive),
     ?SYS_DEBUG("Convicted connections: ~p", [Convicts]),
     Convicts.
+
+find_newborns(ConnsAlive, Conf) ->
+    %% get raw connection names that probably need to be estabilished
+    ActiveConns = [ Conn || {_,_,_,_,_,Status} = Conn <- Conf, Status =:= up ],
+      Newborns = lists:filter(fun({Name, _,_,_,_,up}) ->
+                not lists:member(Name, [ CName || {_,{name, CName}} <- ConnsAlive ])
+        end, ActiveConns),
+    ?SYS_DEBUG("Newborn connections: ~p", [Newborns]),
+    Newborns.
+
+qualify_conns_destiny(Conf) ->
+    %% get alive connections, at least according to the pg2 pool
+    ConnsAlive = lists:map(fun(Pid) ->
+                        {Pid, ucp_conn:get_name(Pid)}
+                 end, get_members_internal()),
+    ?SYS_DEBUG("Connection processes alive: ~p", [ConnsAlive]),
+    Convicts = find_convicts(ConnsAlive, Conf),
+    Newborns = find_newborns(ConnsAlive, Conf),
+    {ok, {Convicts, Newborns}}.
