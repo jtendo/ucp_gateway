@@ -268,7 +268,7 @@ handle_info(Info, StateName, State) ->
 %%--------------------------------------------------------------------
 %% Handle configuration change
 %%--------------------------------------------------------------------
-handle_info({config_reloaded, Conf}, StateName, State) ->
+handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
     ?SYS_INFO("UCP Connection process ~p (~p) received configuration reload
         notification", [State#state.name, self()]),
     NewState = State#state{
