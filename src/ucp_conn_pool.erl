@@ -47,8 +47,7 @@ init([]) ->
     pg2:create(?POOL_NAME),
     confetti:use(ucp_pool_conf, [
             {location, {"ucp_pool_conf.conf", "conf"}},
-            {validators, [fun ensure_conn_names_unique/1]},
-            {subscribe, true}
+            {validators, [fun ensure_conn_names_unique/1]}
         ]),
     Conns = confetti:fetch(ucp_pool_conf),
     {ok, #state{endpoints = Conns}, 0}.
