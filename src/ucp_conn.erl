@@ -17,7 +17,7 @@
 
 %% API
 -export([start_link/1,
-         get_status/1,
+         %get_status/1,
          get_name/1,
          send_txt_message/3,
          send_bin_message/3,
@@ -79,8 +79,8 @@ start_link({Name, Host, Port, Login, Password}) ->
 %%% --------------------------------------------------------------------
 %%% Get status of connection.
 %%% --------------------------------------------------------------------
-get_status(Handle) ->
-    gen_fsm:sync_send_all_state_event(Handle, get_status).
+%get_status(Handle) ->
+%    gen_fsm:sync_send_all_state_event(Handle, get_status).
 
 %%% --------------------------------------------------------------------
 %%% Get connection name.
