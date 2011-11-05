@@ -1,10 +1,8 @@
 -module(ucp_smspp).
 -author('rafal.galczynski@jtendo.com').
 
-%% TODO Lenght using BER notation, needs working hex:int_to_hexstr :(
-
--include("../include/apdu.hrl").
--include("../include/logger.hrl").
+-include("apdu.hrl").
+-include("logger.hrl").
 -compile([export_all]).
 -compile([debug_info]).
 -define(CHUNK_SIZE, 114).

@@ -1,3 +1,4 @@
+%% FIXME - this module is probably obsolete now
 -module(ucp_conn_retry).
 -author('rafal.galczynski@jtendo.com').
 

@@ -1,12 +1,5 @@
-%%%-------------------------------------------------------------------
-%%% @author Andrzej Trawinski
-%%% @copyright (C) 2011, jtendo/
-%%% @doc
-%%%
-%%% @end
-%%% Created : 2011-10-27 09:51:40.456108
-%%%-------------------------------------------------------------------
 -module(ucp_conn).
+-author('andrzej.trawinski@jtendo.com').
 
 -behaviour(gen_fsm).
 
@@ -24,8 +17,11 @@
 
 %% API
 -export([start_link/1,
-         get_status/1,
+         %get_status/1,
+         get_reverse_config/1,
          get_name/1,
+         send_txt_message/3,
+         send_bin_message/3,
          close/1]).
 
 %% gen_fsm callbacks
@@ -42,9 +38,10 @@
 
 -define(SERVER, ?MODULE).
 -define(AUTH_TIMEOUT, 5000).
--define(CMD_TIMEOUT, 2000).
+-define(CMD_TIMEOUT, 3000).
 -define(SEND_TIMEOUT, 1000).
 -define(RETRY_TIMEOUT, 10000).
+-define(CALL_TIMEOUT, 3000).
 -define(TCP_OPTIONS, [binary, {packet, 0}, {active, true}, {reuseaddr, true},
         {keepalive, true}, {send_timeout, ?SEND_TIMEOUT}, {send_timeout_close, false}]).
 -define(CONNECTION_TIMEOUT, 2000).
@@ -76,15 +73,6 @@
 %%% API
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @doc
-%% Creates a gen_fsm process which calls Module:init/1 to
-%% initialize. To ensure a synchronized start-up procedure, this
-%% function does not return until Module:init/1 has returned.
-%%
-%% @spec start_link(Host, Port, Login, Password, UName) -> {ok, Pid} | ignore | {error, Error}
-%% @end
-%%--------------------------------------------------------------------
 start_link({Name, Host, Port, Login, Password}) ->
     gen_fsm:start_link(?MODULE, [Name, Host, Port, Login, Password], [{debug,
                 [trace, log]}]).
@@ -92,14 +80,29 @@ start_link({Name, Host, Port, Login, Password}) ->
 %%% --------------------------------------------------------------------
 %%% Get status of connection.
 %%% --------------------------------------------------------------------
-get_status(Handle) ->
-    gen_fsm:sync_send_all_state_event(Handle, get_status).
+%get_status(Handle) ->
+%    gen_fsm:sync_send_all_state_event(Handle, get_status).
 
 %%% --------------------------------------------------------------------
 %%% Get connection name.
 %%% --------------------------------------------------------------------
 get_name(Handle) ->
     gen_fsm:sync_send_all_state_event(Handle, get_name).
+
+%%% --------------------------------------------------------------------
+%%% Get connection data as in configuration file
+%%% --------------------------------------------------------------------
+get_reverse_config(Handle) ->
+    gen_fsm:sync_send_all_state_event(Handle, get_reverse_config).
+
+%%% --------------------------------------------------------------------
+%%% Sending messages
+%%% --------------------------------------------------------------------
+send_txt_message(Handle, Receiver, Message) ->
+    gen_fsm:sync_send_event(Handle, {send_txt_message, {Receiver, Message}}, ?CALL_TIMEOUT).
+
+send_bin_message(Handle, Receiver, Message) ->
+    gen_fsm:sync_send_event(Handle, {send_bin_message, {Receiver, Message}}, ?CALL_TIMEOUT).
 
 %%% --------------------------------------------------------------------
 %%% Shutdown connection (and process) asynchronous.
@@ -111,19 +114,6 @@ close(Handle) ->
 %%% gen_fsm callbacks
 %%%===================================================================
 
-%%--------------------------------------------------------------------
-%% @private
-%% @doc
-%% Whenever a gen_fsm is started using gen_fsm:start/[3,4] or
-%% gen_fsm:start_link/[3,4], this function is called by the new
-%% process to initialize.
-%%
-%% @spec init(Args) -> {ok, StateName, State} |
-%%                     {ok, StateName, State, Timeout} |
-%%                     ignore |
-%%                     {stop, StopReason}
-%% @end
-%%--------------------------------------------------------------------
 init([Name, Host, Port, Login, Password]) ->
     confetti:use(ucp_conf),
     SMSConnConfig = confetti:fetch(ucp_conf),
@@ -141,7 +131,6 @@ init([Name, Host, Port, Login, Password]) ->
                     dict = dict:new(),
                     req_q = queue:new()},
     {ok, connecting, State, 0}. % Start connecting after timeout
-
 
 connecting(timeout, State) ->
     ?SYS_INFO("Timeout 0!", []),
@@ -175,6 +164,11 @@ handle_event(Event, StateName, State) ->
 handle_sync_event(get_name, _From, StateName, State) ->
     {reply, {name, State#state.name}, StateName, State};
 
+handle_sync_event(get_reverse_config, _From, StateName, State) ->
+    ConfLine = { State#state.name, State#state.host, State#state.port,
+                 State#state.login, State#state.pass, up },
+    {reply, {conf, ConfLine}, StateName, State};
+
 handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
     {reply, {StateName, State}, StateName, State}.
@@ -191,6 +185,9 @@ handle_info({tcp, _Socket, RawData}, wait_auth_response, State) ->
     cancel_timer(State#state.auth_timer),
     case catch received_wait_auth_response(RawData, State) of
         ok ->
+            % cancel keepalive timer if still alive
+            cancel_timer(State#state.keepalive_timer),
+            % process queued messages
             {Action, NextState, NewState} = dequeue_messages(State),
             ?SYS_INFO("Starting keepalive timer", []),
             Timer = erlang:start_timer(NewState#state.keepalive_interval, self(), keepalive_timeout),
@@ -208,7 +205,7 @@ handle_info({tcp, _Socket, RawData}, wait_auth_response, State) ->
 
 handle_info({tcp, _Socket, Data}, active, State) ->
     case catch received_active(Data, State) of
-        {response, Response, _RequestType} ->
+        {response, Response} ->
             NewState = case Response of
                        {reply, Reply, To, S1} -> gen_fsm:reply(To, Reply),
                            S1;
@@ -216,7 +213,8 @@ handle_info({tcp, _Socket, Data}, active, State) ->
                            S1
                    end,
             dequeue_messages(NewState);
-        _ ->
+        Error ->
+            lager:warning("Error handling data: ~p", [Error]),
             {next_state, active, State}
     end;
 
@@ -232,12 +230,12 @@ handle_info({tcp_error, _Socket, Reason}, StateName, State) ->
 %%--------------------------------------------------------------------
 %% Handling timers timeouts
 %%--------------------------------------------------------------------
-handle_info({timeout, Timer, {cmd_timeout, Id}}, StateName, S) ->
-    ?SYS_WARN("Timeout 1", []),
-    case cmd_timeout(Timer, Id, S) of
+handle_info({timeout, Timer, {cmd_timeout, TRN}}, StateName, State) ->
+    lager:debug("Message timed out: ~p", [TRN]),
+    case cmd_timeout(Timer, TRN, State) of
         {reply, To, Reason, NewS} -> gen_fsm:reply(To, Reason),
                                      {next_state, StateName, NewS};
-        {error, _Reason}           -> {next_state, StateName, S}
+        {error, _Reason}           -> {next_state, StateName, State}
     end;
 
 handle_info({timeout, retry_connect}, connecting, State) ->
@@ -273,6 +271,20 @@ handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
     {next_state, StateName, State};
 
 %%--------------------------------------------------------------------
+%% Handle configuration change
+%%--------------------------------------------------------------------
+handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
+    ?SYS_INFO("UCP Connection process ~p (~p) received configuration reload
+        notification", [State#state.name, self()]),
+    NewState = State#state{
+        reply_timeout = proplists:get_value(smsc_reply_timeout, SMSConnConfig, 20000),
+        keepalive_interval = proplists:get_value(smsc_keepalive_interval, SMSConnConfig, 62000),
+        default_originator = proplists:get_value(smsc_default_originator, SMSConnConfig, "2147"),
+        send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000")
+    },
+    {next_state, StateName, NewState};
+
+%%--------------------------------------------------------------------
 %% Empty process message queue from the rubbish
 %%--------------------------------------------------------------------
 handle_info(Info, StateName, State) ->
@@ -293,14 +305,14 @@ terminate(_Reason, _StateName, _State) ->
 %% Convert process state when code is changed
 %%--------------------------------------------------------------------
 code_change(_OldVsn, StateName, State, _Extra) ->
-        {ok, StateName, State}.
+    {ok, StateName, State}.
 
 
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
 dequeue_messages(State) ->
-    ?SYS_INFO("Dequeing messages...", []),
+    lager:debug("Dequeing messages..."),
     case queue:out(State#state.req_q) of
         {{value, {Event, From}}, Q} ->
             case process_message(Event, From, State#state{req_q=Q}) of
@@ -315,7 +327,7 @@ dequeue_messages(State) ->
 
 process_message(Event, From, State) ->
     ?SYS_INFO("Processing message: ~p", [Event]),
-    case send_message(Event, From, State) of
+    case process_event(Event, From, State) of
         {ok, NewState} ->
             {next_state, active, NewState};
         {error, _Reason} ->
@@ -354,47 +366,52 @@ send_auth_message(State) ->
         Error -> Error
     end.
 
-send_message(Event = {_Type, Message}, From, State) ->
-    %UsageTimeDiff = timer:now_diff(erlang:now(), State#state.last_usage),
-    %AllowedTimeDiff = State#state.send_interval,
-    %case UsageTimeDiff < AllowedTimeDiff of
-        %true ->
-            %?SYS_DEBUG("~s| SMSC connection send interval to small [~s µs], slepping for [~s µs]",
-                       %[ReqId, integer_to_list(UsageTimeDiff), integer_to_list(AllowedTimeDiff-UsageTimeDiff)]),
-            %?SYS_DEBUG("~s| SMSC sleeping for ~s µs" , [ReqId, integer_to_list(AllowedTimeDiff-UsageTimeDiff)]),
-            %sleep(AllowedTimeDiff - UsageTimeDiff);
-        %false ->
-            %ok
-    %end,
+% {ok, newstate} lub {error, message}
+process_event(Event, From, State) ->
+    {ok, Messages, NewState} = generate_messages(Event, State),
+    send_messages(Event, From, Messages, NewState).
+
+send_messages(_Event, _From, [], State) ->
+    % nothing to send or end of messages
+    {ok, State};
+send_messages(Event, From, [{TRN, Message}|Rest], State) ->
     ?SYS_DEBUG("Sending message: ~p", [Message]),
-    case gen_tcp:send(State#state.socket, Message) of
+    case gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)) of
         ok ->
-            Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, State#state.trn}),
-            NewDict = dict:store(State#state.trn, [{Timer, Event, From, "Name"}], State#state.dict),
-            %New_dict = dict:store(Id, [{Timer, Command, From, Name}], S#eldap.dict),
-            {ok, State#state{dict = NewDict}};
+            Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, TRN}),
+            NewDict = dict:store(TRN, [{Timer, Event, From}], State#state.dict),
+            send_messages(Event, From, Rest, State#state{dict = NewDict});
         Error -> Error
     end.
 
-%handle_call({send_message,{Receiver, Msg, ReqId}}, _From, State) ->
-    %Seq = ucp_utils:get_next_seq(State#state.seq),
-    %Sender = State#state.default_originator,
-    %{ok, UcpMessage} = ucp_messages:create_m51(Seq, Sender, Receiver, Msg),
-    %{Reply, NState, _Reason} = send_message(State, UcpMessage, ReqId),
-    %{reply, Reply, NState#state{seq=Seq}};
+generate_messages({send_txt_message, {Receiver, Message}}, State) ->
+    TRN = ucp_utils:get_next_trn(State#state.trn),
+    {ok, Msg} = ucp_messages:create_cmd_51_text(TRN, State#state.default_originator, Receiver, Message),
+    {ok, [{TRN, Msg}], State#state{trn = TRN}};
 
-%handle_call({send_binary_message,{Receiver, Msg, ReqId}}, _From, State) ->
-    %Seq = ucp_utils:get_next_seq(State#state.seq),
-    %Sender = State#state.default_originator,
-    %Messages = ucp_messages:create_m51(Seq, Sender, Receiver, Msg),
-    %lists:map(fun({ok, Message}) ->
-                      %binpp:pprint(Message),
-                      %send_message(State, Message, ReqId)
-              %end, Messages),
-    %{reply, ok, State#state{seq=erlang:list_to_integer(Seq) + length(Messages)}};
+generate_messages({send_bin_message, {Receiver, Message}}, State) ->
+    %TODO: change this!!! Function in ucp_smspp not implmented
+    Tpdus = ucp_smspp:create_tpud_message(Message),
+    create_bin_message(Receiver, Tpdus, State).
 
+% Process binary parts
+create_bin_message(Receiver, Bins, State) ->
+    create_bin_message(Receiver, Bins, State, []).
+
+create_bin_message(_Receiver, [], State, Result) ->
+    {lists:reverse(Result), State};
+create_bin_message(Receiver, [Bin|Tail], State, Result) ->
+    TRN = ucp_utils:get_next_trn(State#state.trn),
+    {ok, Msg} = ucp_messages:create_cmd_51_binary(TRN, State#state.default_originator,
+            Receiver, Bin),
+    create_bin_message(Receiver, Tail, State#state{trn = TRN}, [{TRN, Msg}|Result]).
+
+
+cancel_timer(undefined) ->
+    ok;
 cancel_timer(Timer) ->
-    erlang:cancel_timer(Timer),
+    Value = erlang:cancel_timer(Timer),
+    lager:debug("Timer ~p canceled with value: ~p", [Timer, Value]),
     receive
         {timeout, Timer, _} ->
             ok
@@ -405,9 +422,9 @@ cancel_timer(Timer) ->
 close_and_retry(State, Timeout) ->
     catch gen_tcp:close(State#state.socket),
     Queue = dict:fold(
-              fun(_Id, [{Timer, Command, From, _Name}|_], Q) ->
+              fun(_Id, [{Timer, Event, From}|_], Q) ->
                       cancel_timer(Timer),
-                      queue:in_r({Command, From}, Q);
+                      queue:in_r({Event, From}, Q);
                  (_, _, Q) ->
                       Q
               end, State#state.req_q, State#state.dict),
@@ -458,17 +475,27 @@ check_trn(_, _)   -> throw({error, wrong_auth_trn}).
 received_active(Data, State) ->
     case ucp_utils:decode_message(Data) of
         {ok, Message} ->
-            process_message(Message, State);
-        _Else ->
+            lager:debug("Processing message: ~p", [Message]),
+            % TODO: catch processing errors
+            {response, process_message(Message, State)};
+        Error ->
             % Decoding failed = ignore message
             %TODO: Make sure is't OK?
-            ?SYS_INFO("Unknown data: ~p", [Data]),
-            {ok, State}
+            lager:warning("Error parsing data: ~p", [Error]),
+            Error
     end.
 
 process_message({#ucp_header{ot = "31", o_r = "R"}, _Body}, State) ->
     % just keepalive ack/nack - do nothing
     {ok, State};
+
+process_message({#ucp_header{ot = "51", o_r = "R", trn = TRN}, Body}, State) ->
+    IntTRN = erlang:list_to_integer(TRN),
+    {Timer, _Event, From} = get_msg_rec(IntTRN, State#state.dict),
+    NewDict = dict:erase(IntTRN, State#state.dict),
+    cancel_timer(Timer),
+    Reply = check_result(Body),
+    {reply, Reply, From, State#state{dict = NewDict}};
 
 process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     % respond with ACK
@@ -477,17 +504,34 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     ?SYS_INFO("Sending ACK message: ~p", [Message]),
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)),
     %TODO: Check sending result = Don't know what to do when error!!
+    {ok, State};
+
+process_message(Message, State) ->
+    lager:debug("Unhandled message: ~p", [Message]),
     {ok, State}.
+
+check_result(Result) when is_record(Result, ack) ->
+    ok;
+check_result(Result) when is_record(Result, nack) ->
+    {error, Result#nack.sm}.
 
 %%-----------------------------------------------------------------------
 %% Sort out timed out commands
 %%-----------------------------------------------------------------------
-cmd_timeout(Timer, Id, State) ->
+cmd_timeout(Timer, TRN, State) ->
     Dict = State#state.dict,
-    case dict:find(Id, Dict) of
-        {ok, [{Timer, _Command, From, _Name}|_Res]} ->
-            NewDict = dict:erase(Id, Dict),
+    case dict:find(TRN, Dict) of
+        {ok, [{Timer, _Event, From}|_Res]} ->
+            NewDict = dict:erase(TRN, Dict),
             {reply, From, {error, timeout}, State#state{dict = NewDict}};
         error ->
             {error, timed_out_cmd_not_in_dict}
+    end.
+
+get_msg_rec(TRN, Dict) ->
+    case dict:find(TRN, Dict) of
+        {ok, [{Timer, Event, From}]} ->
+            {Timer, Event, From};
+        error ->
+            throw({error, unknown_trn})
     end.
