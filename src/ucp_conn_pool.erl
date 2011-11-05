@@ -114,19 +114,19 @@ get_members_internal() ->
     pg2:get_local_members(?POOL_NAME).
 
 find_orphans(Conf) ->
-    GetNamesAlive = fun(Pid) ->
+    %% get alive connections, at least according to the pg2 pool
+    ConnsAlive = lists:map(fun(Pid) ->
                         {Pid, ucp_conn:get_name(Pid)}
-                    end,
-    ConnsAlive = lists:map(GetNamesAlive, get_members_internal()),
-    ?SYS_DEBUG("Connections alive: ~p", [ConnsAlive]),
+                 end, get_members_internal()),
+    %% get raw connection names from configuration
     ConfNames = lists:map(fun(C) ->
                             {N,_,_,_,_,_} = C,
                             N
                           end, Conf),
     ?SYS_DEBUG("Connection names configured: ~p", [ConfNames]),
-    IsConnConfigured = fun({_, {name, Name}}) ->
+    %% filter out connections that are not configured
+    Result = lists:filter(fun({_, {name, Name}}) ->
         not lists:member(Name, ConfNames)
-    end,
-    Result = lists:filter(IsConnConfigured, ConnsAlive),
+    end, ConnsAlive),
     ?SYS_DEBUG("Orphans: ~p", [Result]),
     Result.
