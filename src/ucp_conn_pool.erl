@@ -47,7 +47,8 @@ init([]) ->
     pg2:create(?POOL_NAME),
     confetti:use(ucp_pool_conf, [
             {location, {"ucp_pool_conf.conf", "conf"}},
-            {validators, [fun ensure_conn_names_unique/1]}
+            {validators, [fun ensure_conn_names_unique/1]},
+            {subscribe, true}
         ]),
     Conns = confetti:fetch(ucp_pool_conf),
     {ok, #state{endpoints = Conns}, 0}.
@@ -128,6 +129,10 @@ connect_smsc({Name, _Host, _Port, _Login, _Password, State}) ->
 get_members_internal() ->
     pg2:get_local_members(?POOL_NAME).
 
+%% TODO
+%% Identify common patterns among find_* funs
+%% Extract them for the sake of purity, fame and fortune
+
 find_convicts(ConnsAlive, Conf) ->
     %% get raw connection names from configuration
     ConfNames = [ N || {N,_,_,_,_,_} <- Conf ],
@@ -152,6 +157,23 @@ find_newborns(ConnsAlive, Conf) ->
     ?SYS_DEBUG("Newborn connections: ~p", [Newborns]),
     Newborns.
 
+find_chameleons(ConnsAlive, Conf) ->
+    %% TODO
+    %% 1. Identify which of alive connections are active (up) --
+    %%    we can safely skip ones being down -- it doesn't matter
+    %% 2. Message them with RCLine = get_reverse_config
+    %% 3. Filter out these for which RCLine differs from ConfLine
+    %% FIXME A few beers remaining, this might get wild
+    ActiveConns = [ Conn || {_,_,_,_,_,Status} = Conn <- Conf, Status =:= up ],
+    ReversedConfs = lists:map(fun({P,_}) ->
+                {conf, C} = ucp_conn:get_reverse_config(P),
+                C
+        end, ConnsAlive),
+    ChameleonsConfs = lists:filter(fun(ConfLine) ->
+                                        not lists:member(ConfLine, ReversedConfs)
+                                   end, ActiveConns),
+    {[ Name || {Name,_,_,_,_,_} <- ChameleonsConfs ], ChameleonsConfs}.
+
 qualify_conns_destiny(Conf) ->
     %% get alive connections, at least according to the pg2 pool
     ConnsAlive = lists:map(fun(Pid) ->
@@ -160,7 +182,15 @@ qualify_conns_destiny(Conf) ->
     ?SYS_DEBUG("Connection processes alive: ~p", [ConnsAlive]),
     Convicts = find_convicts(ConnsAlive, Conf),
     Newborns = find_newborns(ConnsAlive, Conf),
-    {ok, {Convicts, Newborns}}.
+    ?SYS_DEBUG("Attempting to find chameleons...", []),
+    case find_chameleons(ConnsAlive, Conf) of
+        {[], []} ->
+            ?SYS_DEBUG("No chameleons found...", []),
+            {ok, {Convicts, Newborns}};
+        {ChNames, ChConfs} when is_list(ChNames), is_list(ChConfs) ->
+            ?SYS_DEBUG("Chameleons found...", []),
+            {ok, {Convicts ++ ChNames, Newborns ++ ChConfs}}
+    end.
 
 ensure_conn_names_unique(Conf) ->
     Names = lists:usort([ Name || {Name,_,_,_,_,_} <- Conf ]),

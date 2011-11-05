@@ -18,6 +18,7 @@
 %% API
 -export([start_link/1,
          %get_status/1,
+         get_reverse_config/1,
          get_name/1,
          send_txt_message/3,
          send_bin_message/3,
@@ -89,6 +90,12 @@ get_name(Handle) ->
     gen_fsm:sync_send_all_state_event(Handle, get_name).
 
 %%% --------------------------------------------------------------------
+%%% Get connection data as in configuration file
+%%% --------------------------------------------------------------------
+get_reverse_config(Handle) ->
+    gen_fsm:sync_send_all_state_event(Handle, get_reverse_config).
+
+%%% --------------------------------------------------------------------
 %%% Sending messages
 %%% --------------------------------------------------------------------
 send_txt_message(Handle, Receiver, Message) ->
@@ -156,6 +163,11 @@ handle_event(Event, StateName, State) ->
 
 handle_sync_event(get_name, _From, StateName, State) ->
     {reply, {name, State#state.name}, StateName, State};
+
+handle_sync_event(get_reverse_config, _From, StateName, State) ->
+    ConfLine = { State#state.name, State#state.host, State#state.port,
+                 State#state.login, State#state.pass, up },
+    {reply, {conf, ConfLine}, StateName, State};
 
 handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
