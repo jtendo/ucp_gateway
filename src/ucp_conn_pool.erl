@@ -50,7 +50,7 @@ init([]) ->
     {ok, #state{endpoints = Conns}, 0}.
 
 handle_call(get_members, _From, State) ->
-    Reply = pg2:get_local_members(?POOL_NAME),
+    Reply = get_members_internal(),
     {reply, Reply, State};
 
 handle_call({join_pool}, {Pid, _}, State) ->
@@ -72,8 +72,24 @@ handle_info(timeout, #state{endpoints = Endpoints} = State) ->
     lists:map(fun connect_smsc/1, Endpoints),
     {noreply, State};
 
+handle_info({config_reloaded, Conf}, State) ->
+    ?SYS_INFO("UCP Connection pool received configuration change
+        notification...", []),
+    case find_orphans(Conf) of
+        [] ->
+            ?SYS_DEBUG("No orphaned connections found...", []);
+        Orphans when is_list(Orphans) ->
+            ?SYS_INFO("Found orphaned connections: ~p. Kill attempts in
+                progress.", [Orphans]),
+            lists:foreach(fun({Pid, Name}) ->
+                        Res = ucp_conn:close(Pid),
+                        ?SYS_INFO("Killing ~p... ~p", [{Pid,Name}, Res])
+                end, Orphans)
+    end,
+    {noreply, State};
+
 handle_info(_Info, State) ->
-        {noreply, State}.
+    {noreply, State}.
 
 terminate(_Reason, _State) ->
     ok.
@@ -94,3 +110,23 @@ connect_smsc({Name, _Host, _Port, _Login, _Password, State}) ->
    ?SYS_DEBUG("Connection ~p excluded from starting, due to its status: ~p", [Name, State]),
    ok.
 
+get_members_internal() ->
+    pg2:get_local_members(?POOL_NAME).
+
+find_orphans(Conf) ->
+    GetNamesAlive = fun(Pid) ->
+                        {Pid, ucp_conn:get_name(Pid)}
+                    end,
+    ConnsAlive = lists:map(GetNamesAlive, get_members_internal()),
+    ?SYS_DEBUG("Connections alive: ~p", [ConnsAlive]),
+    ConfNames = lists:map(fun(C) ->
+                            {N,_,_,_,_,_} = C,
+                            N
+                          end, Conf),
+    ?SYS_DEBUG("Connection names configured: ~p", [ConfNames]),
+    IsConnConfigured = fun({_, {name, Name}}) ->
+        not lists:member(Name, ConfNames)
+    end,
+    Result = lists:filter(IsConnConfigured, ConnsAlive),
+    ?SYS_DEBUG("Orphans: ~p", [Result]),
+    Result.
