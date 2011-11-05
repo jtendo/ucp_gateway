@@ -45,7 +45,10 @@ join_pool() ->
 
 init([]) ->
     pg2:create(?POOL_NAME),
-    confetti:use(ucp_pool_conf),
+    confetti:use(ucp_pool_conf, [
+            {location, {"ucp_pool_conf.conf", "conf"}},
+            {validators, [fun ensure_conn_names_unique/1]}
+        ]),
     Conns = confetti:fetch(ucp_pool_conf),
     {ok, #state{endpoints = Conns}, 0}.
 
@@ -156,3 +159,13 @@ qualify_conns_destiny(Conf) ->
     Convicts = find_convicts(ConnsAlive, Conf),
     Newborns = find_newborns(ConnsAlive, Conf),
     {ok, {Convicts, Newborns}}.
+
+ensure_conn_names_unique(Conf) ->
+    Names = lists:usort([ Name || {Name,_,_,_,_,_} <- Conf ]),
+    case length(Names) =:= length(Conf) of
+        true -> {ok, Conf};
+        false -> {error, {ucp_pool_conf, "Connections names must be unique"}}
+    end.
+
+
+
