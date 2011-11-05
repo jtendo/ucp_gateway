@@ -24,7 +24,11 @@ start_child(Conf) ->
 %% Supervisor callbacks
 %% ===================================================================
 
+%% A permanent process should always be restarted, no matter what.
+%% We don't need the supervisor restart processes that were explicitly shut
+%% down (i.e. orphan connections kill).
+
 init([]) ->
-    Worker = {ucp_conn, {ucp_conn, start_link, []}, permanent, brutal_kill, worker, [ucp_conn]},
+    Worker = {ucp_conn, {ucp_conn, start_link, []}, transient, brutal_kill, worker, [ucp_conn]},
     {ok, {{simple_one_for_one, 10, 60}, [Worker]}}.
 
