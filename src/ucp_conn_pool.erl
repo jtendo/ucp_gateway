@@ -118,7 +118,7 @@ find_connections_to_kill(Conf) ->
                         {Pid, ucp_conn:get_name(Pid)}
                  end, get_members_internal()),
     %% get raw connection names from configuration
-    ConfNames = lists:map(fun(C) -> {N,_,_,_,_,_} = C, N end, Conf),
+    ConfNames = [ N || {N,_,_,_,_,_,_} <- Conf ],
     %% get raw connection names that are explicitly told to be shut down
     ConfsToShutdown = [ N || {N,_,_,_,_,Status} <- Conf, Status =:= down ],
     ?SYS_DEBUG("Connection names configured: ~p", [ConfNames]),
