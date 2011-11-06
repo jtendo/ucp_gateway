@@ -112,12 +112,12 @@ connect_smsc({Name, {_Host, _Port, _Login, _Password, State}}) ->
    ?SYS_DEBUG("Connection ~p excluded from starting, due to its status: ~p", [Name, State]),
    ok.
 
+get_members_internal() ->
+    pg2:get_local_members(?POOL_NAME).
+
 %%%===================================================================
 %%% Configuration reload handlers
 %%%===================================================================
-
-get_members_internal() ->
-    pg2:get_local_members(?POOL_NAME).
 
 kill_convicts([]) -> ?SYS_DEBUG("No unused connections found...", []);
 kill_convicts(C) when is_list(C) ->
