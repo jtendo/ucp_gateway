@@ -63,7 +63,7 @@ handle_call(get_members, _From, State) ->
     {reply, Reply, State};
 
 handle_call({join_pool}, {Pid, _}, State) ->
-    case lists:member(Pid, pg2:get_local_members(?POOL_NAME)) of
+    case lists:member(Pid, get_members_internal()) of
         true -> ok;
         false ->
             pg2:join(?POOL_NAME, Pid)
