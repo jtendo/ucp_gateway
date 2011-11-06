@@ -73,8 +73,8 @@
 %%% API
 %%%===================================================================
 
-start_link({Name, Host, Port, Login, Password}) ->
-    gen_fsm:start_link(?MODULE, [Name, Host, Port, Login, Password], [{debug,
+start_link({Name, {Host, Port, Login, Password}}) ->
+    gen_fsm:start_link(?MODULE, [Name, {Host, Port, Login, Password}], [{debug,
                 [trace, log]}]).
 
 %%% --------------------------------------------------------------------
@@ -114,7 +114,7 @@ close(Handle) ->
 %%% gen_fsm callbacks
 %%%===================================================================
 
-init([Name, Host, Port, Login, Password]) ->
+init([Name, {Host, Port, Login, Password}]) ->
     confetti:use(ucp_conf),
     SMSConnConfig = confetti:fetch(ucp_conf),
     State = #state{ name = Name,
@@ -165,8 +165,8 @@ handle_sync_event(get_name, _From, StateName, State) ->
     {reply, {name, State#state.name}, StateName, State};
 
 handle_sync_event(get_reverse_config, _From, StateName, State) ->
-    ConfLine = { State#state.name, State#state.host, State#state.port,
-                 State#state.login, State#state.pass, up },
+    ConfLine = { State#state.name, {State#state.host, State#state.port,
+                 State#state.login, State#state.pass, up }},
     {reply, {conf, ConfLine}, StateName, State};
 
 handle_sync_event(Event, From, StateName, State) ->

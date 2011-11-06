@@ -23,6 +23,11 @@
 
 -record(state, {endpoints}).
 
+-type alive_conns() :: [{atom(), pid()}] | [].
+-type pool_config() :: [{atom(), tuple()}] | [].
+-type newborns() :: pool_config().
+-type convicts() :: alive_conns().
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -47,7 +52,8 @@ init([]) ->
     pg2:create(?POOL_NAME),
     confetti:use(ucp_pool_conf, [
             {location, {"ucp_pool_conf.conf", "conf"}},
-            {validators, [fun ensure_conn_names_unique/1]}
+            {validators, [fun ensure_valid_syntax/1,
+                          fun ensure_conn_names_unique/1]}
         ]),
     Conns = confetti:fetch(ucp_pool_conf),
     {ok, #state{endpoints = Conns}, 0}.
@@ -81,18 +87,18 @@ handle_info({config_reloaded, Conf}, State) ->
     ?SYS_INFO("UCP Connection pool received configuration change
         notification...", []),
     ?SYS_DEBUG("New configuration: ~p", [Conf]),
-    {ok, {Convicts, Newborns}} = qualify_conns_destiny(Conf),
-    case Convicts of
+    { {convicts, C}, {newborns, N} } = qualify_conns_destiny(Conf),
+    case C of
         [] ->
             ?SYS_DEBUG("No unused connections found...", []);
         ConvictConns when is_list(ConvictConns) ->
             ?SYS_INFO("Found unused connections: ~p", [ConvictConns]),
-            lists:foreach(fun({Pid, Name}) ->
+            lists:foreach(fun({Name, Pid}) ->
                         Res = ucp_conn:close(Pid),
                         ?SYS_INFO("Killing ~p... ~p", [{Pid,Name}, Res])
                 end, ConvictConns)
     end,
-    case Newborns of
+    case N of
         [] ->
             ?SYS_DEBUG("No new connections to estabilish...", []);
         NewbornConns when is_list(NewbornConns) ->
@@ -116,87 +122,122 @@ code_change(_OldVsn, State, _Extra) ->
 %%% Internal functions
 %%%===================================================================
 
-connect_smsc({Name, Host, Port, Login, Password, up}) ->
+connect_smsc({Name, {Host, Port, Login, Password, up}}) ->
    % TODO: handle errors
-   {ok, _Pid} = ucp_conn_sup:start_child({Name, Host, Port, Login, Password}),
+   {ok, _Pid} = ucp_conn_sup:start_child({Name, {Host, Port, Login, Password}}),
    ok;
 
-connect_smsc({Name, _Host, _Port, _Login, _Password, State}) ->
+connect_smsc({Name, {_Host, _Port, _Login, _Password, State}}) ->
    ?SYS_DEBUG("Connection ~p excluded from starting, due to its status: ~p", [Name, State]),
    ok.
 
 get_members_internal() ->
     pg2:get_local_members(?POOL_NAME).
 
-%% TODO
-%% Identify common patterns among find_* funs
-%% Extract them for the sake of purity, fame and fortune
+is_conn_alive(Name, ConnsAlive) ->
+    lists:member(Name, [ CName || {CName, _} <- ConnsAlive ]).
 
+-spec find_convicts(alive_conns(), pool_config()) -> convicts().
+
+find_convicts(ConnsAlive, []) -> ConnsAlive;
 find_convicts(ConnsAlive, Conf) ->
-    %% get raw connection names from configuration
-    ConfNames = [ N || {N,_,_,_,_,_} <- Conf ],
-    ?SYS_DEBUG("All configured connections: ~p", [ConfNames]),
-    %% get raw connection names that are explicitly told to be shut down
-    ConfsToShutdown = [ N || {N,_,_,_,_,Status} <- Conf, Status =:= down ],
-    ?SYS_DEBUG("Connection names configured: ~p", [ConfNames]),
-    %% filter out connections that are not configured or need to be shut down
-    Convicts = lists:filter(fun({_, {name, Name}}) ->
-        not lists:member(Name, ConfNames)
-        or lists:member(Name, ConfsToShutdown)
-    end, ConnsAlive),
-    ?SYS_DEBUG("Convicted connections: ~p", [Convicts]),
-    Convicts.
+    lists:filter(fun({Name, _}) ->
+                ?SYS_DEBUG("ConnsAlive: ~p", [ConnsAlive]),
+                ?SYS_DEBUG("Conf ~p", [Conf]),
+                ?SYS_DEBUG("Name ~p", [Name]),
+                {_,_,_,_,Status} = proplists:get_value(Name, Conf),
+                %% find oprhans
+                not lists:member(Name, proplists:get_keys(Conf))
+                %% find explicit shutdowns
+                or (Status =:= down)
+        end, ConnsAlive).
 
+-spec find_newborns(alive_conns(), pool_config()) -> newborns().
+
+find_newborns(_, []) -> [];
 find_newborns(ConnsAlive, Conf) ->
-    %% get raw connection names that probably need to be estabilished
-    ActiveConns = [ Conn || {_,_,_,_,_,Status} = Conn <- Conf, Status =:= up ],
-      Newborns = lists:filter(fun({Name, _,_,_,_,up}) ->
-                not lists:member(Name, [ CName || {_,{name, CName}} <- ConnsAlive ])
-        end, ActiveConns),
-    ?SYS_DEBUG("Newborn connections: ~p", [Newborns]),
-    Newborns.
+    lists:filter(fun({Name,{_,_,_,_,Status}}) ->
+                case Status of
+                    up -> not is_conn_alive(Name, ConnsAlive);
+                    down -> false
+                end
+        end, Conf).
 
+-spec find_chameleons(alive_conns(), pool_config()) ->
+    { {c, convicts()}, {n, newborns()} } | undefined.
+
+find_chameleons(_, []) -> undefined;
+find_chameleons([], _) -> undefined;
 find_chameleons(ConnsAlive, Conf) ->
-    %% TODO
-    %% 1. Identify which of alive connections are active (up) --
-    %%    we can safely skip ones being down -- it doesn't matter
-    %% 2. Message them with RCLine = get_reverse_config
-    %% 3. Filter out these for which RCLine differs from ConfLine
-    %% FIXME A few beers remaining, this might get wild
-    ActiveConns = [ Conn || {_,_,_,_,_,Status} = Conn <- Conf, Status =:= up ],
-    ReversedConfs = lists:map(fun({P,_}) ->
-                {conf, C} = ucp_conn:get_reverse_config(P),
-                C
-        end, ConnsAlive),
-    ChameleonsConfs = lists:filter(fun(ConfLine) ->
-                                        not lists:member(ConfLine, ReversedConfs)
-                                   end, ActiveConns),
-    {[ Name || {Name,_,_,_,_,_} <- ChameleonsConfs ], ChameleonsConfs}.
+    Newborns = lists:filter(fun({Name,_} = ConfProp) ->
+                case is_conn_alive(Name, ConnsAlive) of
+                    true ->
+                        {conf, C} = ucp_conn:get_reverse_config(
+                                        proplists:get_value(Name, ConnsAlive)),
+                        C =/= ConfProp;
+                    false -> false
+                end
+        end, [ Conn || {_,{_,_,_,_,Status}} = Conn <- Conf, Status =:= up ]),
+    case Newborns of
+        [] -> undefined;
+        Nborns when is_list(Nborns) ->
+            Convicts = lists:map(fun({Name, _Newborn}) ->
+                        proplists:lookup(Name, ConnsAlive)
+                end, Nborns),
+            {{c,Convicts},{n,Nborns}}
+    end.
+
+-spec qualify_conns_destiny(pool_config()) ->
+    {{convicts, convicts()}, {newborns, newborns()}}.
 
 qualify_conns_destiny(Conf) ->
     %% get alive connections, at least according to the pg2 pool
     ConnsAlive = lists:map(fun(Pid) ->
-                        {Pid, ucp_conn:get_name(Pid)}
+                        {name, N} = ucp_conn:get_name(Pid),
+                        {N, Pid}
                  end, get_members_internal()),
     ?SYS_DEBUG("Connection processes alive: ~p", [ConnsAlive]),
     Convicts = find_convicts(ConnsAlive, Conf),
     Newborns = find_newborns(ConnsAlive, Conf),
-    ?SYS_DEBUG("Attempting to find chameleons...", []),
-    case find_chameleons(ConnsAlive, Conf) of
-        {[], []} ->
-            ?SYS_DEBUG("No chameleons found...", []),
-            {ok, {Convicts, Newborns}};
-        {ChNames, ChConfs} when is_list(ChNames), is_list(ChConfs) ->
-            ?SYS_DEBUG("Chameleons found...", []),
-            {ok, {Convicts ++ ChNames, Newborns ++ ChConfs}}
+    Chameleons = find_chameleons(ConnsAlive, Conf),
+    ?SYS_DEBUG("Convicts: ~p", [Convicts]),
+    ?SYS_DEBUG("Newborns: ~p", [Newborns]),
+    ?SYS_DEBUG("Chameleons: ~p", [Chameleons]),
+    case Chameleons of
+        undefined  ->
+            { {convicts, Convicts}, {newborns, Newborns} };
+        {{c,ChConvicts},{n,ChNewborns}} ->
+            { {convicts, ChConvicts ++ Convicts},
+              {newborns, ChNewborns ++ Newborns} }
     end.
 
 ensure_conn_names_unique(Conf) ->
-    Names = lists:usort([ Name || {Name,_,_,_,_,_} <- Conf ]),
+    Names = lists:usort([ Name || {Name,_} <- Conf ]),
     case length(Names) =:= length(Conf) of
         true -> {ok, Conf};
         false -> {error, {ucp_pool_conf, "Connections names must be unique"}}
     end.
+
+ensure_valid_syntax(Conf) ->
+    try
+        lists:foreach(fun(Term) ->
+                    case Term of
+                        {Name, {Host, Port, Login, Pass, Status}} when
+                            is_atom(Name),
+                            is_atom(Host) orelse is_list(Host),
+                            is_integer(Port),
+                            is_list(Login),
+                            is_list(Pass),
+                            Status =:= up orelse Status =:= down ->
+                                ok;
+                        _ ->
+                            throw({badmatch, Term})
+                    end
+            end, Conf) of
+                _ -> {ok, Conf}
+        catch _Class:Error -> {error, Error}
+    end.
+
 
 
 
