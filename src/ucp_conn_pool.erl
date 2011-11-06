@@ -86,25 +86,8 @@ handle_info({config_reloaded, Conf}, State) ->
         notification...", []),
     ?SYS_DEBUG("New configuration: ~p", [Conf]),
     { {convicts, C}, {newborns, N} } = qualify_conns_destiny(Conf),
-    case C of
-        [] ->
-            ?SYS_DEBUG("No unused connections found...", []);
-        ConvictConns when is_list(ConvictConns) ->
-            ?SYS_INFO("Found unused connections: ~p", [ConvictConns]),
-            lists:foreach(fun({Name, Pid}) ->
-                        Res = ucp_conn:close(Pid),
-                        ?SYS_INFO("Killing ~p... ~p", [{Pid,Name}, Res])
-                end, ConvictConns)
-    end,
-    case N of
-        [] ->
-            ?SYS_DEBUG("No new connections to estabilish...", []);
-        NewbornConns when is_list(NewbornConns) ->
-            ?SYS_INFO("Found new connections to estabilish: ~p",
-                [NewbornConns]),
-            lists:foreach(fun(ConnData) -> connect_smsc(ConnData) end,
-                NewbornConns)
-    end,
+    kill_convicts(C),
+    ressurect_newborns(N),
     {noreply, State};
 
 handle_info(_Info, State) ->
@@ -129,8 +112,25 @@ connect_smsc({Name, {_Host, _Port, _Login, _Password, State}}) ->
    ?SYS_DEBUG("Connection ~p excluded from starting, due to its status: ~p", [Name, State]),
    ok.
 
+%%%===================================================================
+%%% Configuration reload handlers
+%%%===================================================================
+
 get_members_internal() ->
     pg2:get_local_members(?POOL_NAME).
+
+kill_convicts([]) -> ?SYS_DEBUG("No unused connections found...", []);
+kill_convicts(C) when is_list(C) ->
+    ?SYS_INFO("Found unused connection(s): ~p", [C]),
+    lists:foreach(fun({Name, Pid}) ->
+                Res = ucp_conn:close(Pid),
+                ?SYS_INFO("Killing ~p... ~p", [{Name,Pid}, Res])
+                end, C).
+
+ressurect_newborns([]) -> ?SYS_DEBUG("No new connections to estabilish...", []);
+ressurect_newborns(N) when is_list(N) ->
+    ?SYS_INFO("Found new connection(s) to estabilish: ~p", [N]),
+    lists:foreach(fun(ConnData) -> connect_smsc(ConnData) end, N).
 
 is_conn_alive(Name, ConnsAlive) ->
     lists:member(Name, [ CName || {CName, _} <- ConnsAlive ]).
