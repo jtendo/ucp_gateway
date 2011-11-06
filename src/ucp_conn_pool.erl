@@ -78,7 +78,7 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(timeout, #state{endpoints = Endpoints} = State) ->
-    lists:map(fun connect_smsc/1, Endpoints),
+    resurrect_newborns(Endpoints),
     {noreply, State};
 
 handle_info({config_reloaded, Conf}, State) ->
@@ -87,7 +87,7 @@ handle_info({config_reloaded, Conf}, State) ->
     ?SYS_DEBUG("New configuration: ~p", [Conf]),
     { {convicts, C}, {newborns, N} } = qualify_conns_destiny(Conf),
     kill_convicts(C),
-    ressurect_newborns(N),
+    resurrect_newborns(N),
     {noreply, State};
 
 handle_info(_Info, State) ->
@@ -127,10 +127,10 @@ kill_convicts(C) when is_list(C) ->
                 ?SYS_INFO("Killing ~p... ~p", [{Name,Pid}, Res])
                 end, C).
 
-ressurect_newborns([]) -> ?SYS_DEBUG("No new connections to estabilish...", []);
-ressurect_newborns(N) when is_list(N) ->
+resurrect_newborns([]) -> ?SYS_DEBUG("No new connections to estabilish...", []);
+resurrect_newborns(N) when is_list(N) ->
     ?SYS_INFO("Found new connection(s) to estabilish: ~p", [N]),
-    lists:foreach(fun(ConnData) -> connect_smsc(ConnData) end, N).
+    lists:foreach(fun connect_smsc/1, N).
 
 is_conn_alive(Name, ConnsAlive) ->
     lists:member(Name, [ CName || {CName, _} <- ConnsAlive ]).
@@ -207,7 +207,7 @@ qualify_conns_destiny(Conf) ->
     end.
 
 ensure_conn_names_unique(Conf) ->
-    Names = lists:usort([ Name || {Name,_} <- Conf ]),
+    Names = lists:usort(proplists:get_keys(Conf)),
     case length(Names) =:= length(Conf) of
         true -> {ok, Conf};
         false -> {error, {ucp_pool_conf, "Connections names must be unique"}}
