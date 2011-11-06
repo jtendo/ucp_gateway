@@ -142,9 +142,6 @@ is_conn_alive(Name, ConnsAlive) ->
 find_convicts(ConnsAlive, []) -> ConnsAlive;
 find_convicts(ConnsAlive, Conf) ->
     lists:filter(fun({Name, _}) ->
-                ?SYS_DEBUG("ConnsAlive: ~p", [ConnsAlive]),
-                ?SYS_DEBUG("Conf ~p", [Conf]),
-                ?SYS_DEBUG("Name ~p", [Name]),
                 {_,_,_,_,Status} = proplists:get_value(Name, Conf),
                 %% find oprhans
                 not lists:member(Name, proplists:get_keys(Conf))
