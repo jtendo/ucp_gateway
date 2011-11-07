@@ -381,7 +381,7 @@ send_messages(Event, From, [{TRN, Message}|Rest], State) ->
             NewDict = dict:store(TRN, [{Timer, Event, From}], State#state.dict),
             send_messages(Event, From, Rest, State#state{dict = NewDict});
         Error -> Error
-    end.
+   end.
 
 generate_messages({send_txt_message, {Receiver, Message}}, State) ->
     TRN = ucp_utils:get_next_trn(State#state.trn),
