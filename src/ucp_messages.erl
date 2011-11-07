@@ -55,8 +55,9 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message) when is_binary(Message) ->
               otoa = OTOA,
               rpid = "0127",
               mcls = "2", %% class message 2
-              xser = "01030270000201F6",
+              xser = "0103027000",
               mt = "4",
+              nb = integer_to_list(length(UCPMsg)*4),
               msg = UCPMsg},
     Header = #ucp_header{
               trn = ucp_utils:trn_to_str(Trn),
