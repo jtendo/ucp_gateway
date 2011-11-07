@@ -48,7 +48,7 @@ create_tpud_message(CNTR, Data) when is_binary(Data)->
       kid_key2=KidKey2
      },
 
-    TPUDS = create_tpud_message(CardProfile, TAR, <<CNTR:40>>, Data),
+    TPUDS = lists:reverse(create_tpud_message(CardProfile, TAR, <<CNTR:40>>, Data)),
     ?SYS_DEBUG("TPUDS                  ~p~n",[TPUDS]),
     TPUDS.
     %% lists:map(fun(Tpud) ->
