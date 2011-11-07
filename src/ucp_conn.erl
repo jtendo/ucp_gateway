@@ -507,7 +507,7 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     case Body#ucp_cmd_5x.mt of
         "4" -> % STK message
             % TODO: decode OAdC
-            Data = ucp_smspp:decrypt(Body#ucp_cmd_5x.msg),
+            %Data = ucp_smspp:decrypt(Body#ucp_cmd_5x.msg),
             {ok, E} = binpp:convert(Body#ucp_cmd_5x.msg),
             lager:debug("Binary msg content encoded: ~p", [E]),
             {ok, D} = binpp:convert(Data),
