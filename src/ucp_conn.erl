@@ -398,7 +398,7 @@ create_bin_message(Receiver, Bins, State) ->
     create_bin_message(Receiver, Bins, State, []).
 
 create_bin_message(_Receiver, [], State, Result) ->
-    {lists:reverse(Result), State};
+    {ok, lists:reverse(Result), State};
 create_bin_message(Receiver, [Bin|Tail], State, Result) ->
     TRN = ucp_utils:get_next_trn(State#state.trn),
     {ok, Msg} = ucp_messages:create_cmd_51_binary(TRN, State#state.default_originator,
@@ -508,9 +508,8 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
         "4" -> % STK message
             % TODO: decode OAdC
             %Data = ucp_smspp:decrypt(Body#ucp_cmd_5x.msg),
-            {ok, E} = binpp:convert(Body#ucp_cmd_5x.msg),
-            lager:debug("Binary msg content encoded: ~p", [E]);
             %gen_event:notify(dynx_router, {rx_msg, {Body#ucp_cmd_5x.oadc, Data}});
+            ok;
         _Else ->
             ignore
     end,

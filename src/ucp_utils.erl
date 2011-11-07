@@ -107,7 +107,10 @@ get_8lsb(Integer) ->
 %%--------------------------------------------------------------------
 %% Function for calculating CRC checksum for UCP Message
 %%--------------------------------------------------------------------
-calculate_crc(Data) ->
+calculate_crc(Data) when is_binary(Data) ->
+    calculate_crc(lists:flatten(hex:to_hexstr(Data)));
+
+calculate_crc(Data) when is_list(Data) ->
     string:right(integer_to_list(get_8lsb(lists:sum(Data)), 16), 2, $0).
 
 %%--------------------------------------------------------------------
