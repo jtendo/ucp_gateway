@@ -8,11 +8,11 @@
 -define(CHUNK_SIZE, 114).
 
 create_tpud_message(CNTR, Data) when is_binary(Data)->
-    TAR = <<16#52, 16#41, 16#44>>, %% Toolkit Application Reference (TAR): 3 octets.
+    TAR = <<16#63, 16#41, 16#45>>, %% Toolkit Application Reference (TAR): 3 octets.
     SPIA =
         ?SPI_CC bor
         ?SPI_ENCRYPTION bor
-        ?SPI_COUNTER_AVAILABLE_NOT_CHECKED,
+        ?SPI_COUNTER_PROCESS_IF_HIGHER_THEN_RE,
     SPIB =
         ?SPI_POR_TO_SE bor
         ?SPI_POR_NO_RC_CC_DS bor
@@ -20,14 +20,15 @@ create_tpud_message(CNTR, Data) when is_binary(Data)->
         ?SPI_POR_SMS_DELIVER_REPORT,
 
     SPI = <<SPIA:8, SPIB:8>>,
-    KIC = ?KIC_ALGORITHM_KNOWN bor ?KIC_ALGORITHM_3DES2 bor 2#100000, %% key id
-    KID = ?KID_ALGORITHM_KNOWN bor ?KID_ALGORITHM_3DES2 bor 2#100000, %% key id
 
-    KicKey1 = <<16#30, 16#42, 16#30, 16#42, 16#30, 16#44, 16#30, 16#44>>,
-    KicKey2 = <<16#30, 16#45, 16#30, 16#45, 16#30, 16#46, 16#30, 16#46>>,
+    KIC = ?KIC_ALGORITHM_DES bor ?KIC_ALGORITHM_3DES2 bor 2#0010000,
+    KID = ?KID_ALGORITHM_DES bor ?KID_ALGORITHM_3DES2 bor 2#0010000,
 
-    KidKey1 = <<16#01, 16#23, 16#45, 16#67, 16#89, 16#AB, 16#CD, 16#EF>>,
-    KidKey2 = <<16#10, 16#02, 16#76, 16#FE, 16#DC, 16#BA, 16#01, 16#23>>,
+    KicKey1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
+    KicKey2 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
+
+    KidKey1 = <<16#22, 16#22, 16#22, 16#22, 16#22, 16#22, 16#22, 16#22>>,
+    KidKey2 = <<16#22, 16#22, 16#22, 16#22, 16#22, 16#22, 16#22, 16#22>>,
 
     CardProfile = #card_profile{
       spi=SPI,
