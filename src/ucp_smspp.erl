@@ -32,7 +32,6 @@ create_tpud_message(CNTR, Data) when is_binary(Data)->
 
     KIC = ?KIC_ALGORITHM_DES bor ?KIC_ALGORITHM_3DES2 bor 2#0010000,
     KID = ?KID_ALGORITHM_DES bor ?KID_ALGORITHM_3DES2 bor 2#0010000,
-
     KicKey1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
     KicKey2 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
 
