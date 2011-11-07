@@ -57,6 +57,7 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message) when is_binary(Message) ->
               mcls = "2", %% class message 2
               xser = "01030270000201F6",
               mt = "4",
+              nb = length(UCPMsg)/2,
               msg = UCPMsg},
     Header = #ucp_header{
               trn = ucp_utils:trn_to_str(Trn),
