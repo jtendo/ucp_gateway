@@ -153,10 +153,10 @@ create_tpud(CProf, TAR, CNTR, Data) ->
                    CProf#card_profile.kic_key1,
                    CProf#card_profile.kic_key2,
                    ToCrypt),
-    UDL =  size(<<CPL:16, CHL:8, ConstPart/binary, SecureData/binary>>),
     UDHL = <<16#02>>,
     IEIa = <<16#70>>,
     IEIDLa = <<16#00>>,
+    UDL =  size(<<CPL:16, CHL:8, UDHL/binary, IEIa/binary, IEIDLa/binary, ConstPart/binary, SecureData/binary>>),
 
     ?SYS_DEBUG("UDL                  ~p, ~p~n", [hex:int_to_hexstr(UDL), UDL]),
     ?SYS_DEBUG("UDHL                 ~p, ~p~n", [hex:bin_to_hexstr(UDHL)]),
@@ -445,4 +445,3 @@ create_whole_command(Tpud) ->
     Command = <<16#a0, 16#c2, 16#00, 16#00>>, %% download command (CLA a0, INS c2 P1 00 p2 00) iso/iec 7816-4
     Size = size(Apdu),
     << Command/binary, Size:8, Apdu/binary >>.
-
