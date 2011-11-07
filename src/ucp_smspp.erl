@@ -8,7 +8,7 @@
 -define(CHUNK_SIZE, 114).
 
 create_tpud_message(CNTR, Data) when is_binary(Data)->
-    TAR = <<16#52, 16#41, 16#44>>, %% Toolkit Application Reference (TAR): 3 octets.
+    TAR = <<16#63, 16#41, 16#45>>, %% Toolkit Application Reference (TAR): 3 octets.
     SPIA =
         ?SPI_CC bor
         ?SPI_ENCRYPTION bor
