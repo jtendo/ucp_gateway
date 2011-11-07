@@ -509,10 +509,8 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
             % TODO: decode OAdC
             %Data = ucp_smspp:decrypt(Body#ucp_cmd_5x.msg),
             {ok, E} = binpp:convert(Body#ucp_cmd_5x.msg),
-            lager:debug("Binary msg content encoded: ~p", [E]),
-            {ok, D} = binpp:convert(Data),
-            lager:debug("Binary msg content encoded: ~p", [D]),
-            gen_event:notify(dynx_router, {rx_msg, {Body#ucp_cmd_5x.oadc, Data}});
+            lager:debug("Binary msg content encoded: ~p", [E]);
+            %gen_event:notify(dynx_router, {rx_msg, {Body#ucp_cmd_5x.oadc, Data}});
         _Else ->
             ignore
     end,
