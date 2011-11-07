@@ -121,13 +121,6 @@ des_encrypt_data(Key, IVec, Data) ->
 des_decrypt_data(Key, IVec, Data) ->
     crypto:des_cbc_decrypt(Key, IVec, ucp_utils:pad_to(8,Data)).
 
-decrypt(Data) ->
-    IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
-    Key1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
-    Key2 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
-
-    crypto:des3_cbc_decrypt(Key1, Key2, Key1, IVec, Data).
-
 create_tpud(CProf, TAR, CNTR, Data) ->
     KIC = CProf#card_profile.kic,
     KID = CProf#card_profile.kic,
