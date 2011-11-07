@@ -7,6 +7,15 @@
 -compile([debug_info]).
 -define(CHUNK_SIZE, 114).
 
+test(CNTR, String) ->
+
+    lists:map(fun(Tpud) ->
+                      ?SYS_DEBUG("TPUD = ~p~n", [hex:bin_to_hexstr(Tpud)]),
+                      C = create_whole_command(Tpud),
+                      ?SYS_DEBUG("COMMAND = ~p~n", [lists:flatten(hex:bin_to_hexstr(C))])
+              end,  create_tpud_message(CNTR, erlang:list_to_binary(String))).
+
+
 create_tpud_message(CNTR, Data) when is_binary(Data)->
     TAR = <<16#63, 16#41, 16#45>>, %% Toolkit Application Reference (TAR): 3 octets.
     SPIA =
@@ -347,13 +356,13 @@ create_tpdu(#tpdu{mti_mms_udhl_rp = MTI_MMS_UDHL_RP,
                   tp_ud = TP_UD
                  }) ->
     TAG = <<16#0b>>,
-    TP_UDL = size(TP_UD),
+    %% TP_UDL = size(TP_UD),
     LENGTH = size(MTI_MMS_UDHL_RP) +
         size(ADDRESS_VALUE) + 2 + %% from TON_NPI and ADDRESS_LEN
         size(TP_PID) +
         size(TP_DCS) +
         size(TP_SCTS) +
-        size(TP_UD) + 1, %% for TP_UDL
+        size(TP_UD), %% for TP_UDL
 
     ?SYS_DEBUG("TPDU TAG             ~p~n",     [hex:bin_to_hexstr(TAG)]),
     ?SYS_DEBUG("TPDU LEN             ~p~n",     [hex:int_to_hexstr(LENGTH)]),
@@ -364,7 +373,7 @@ create_tpdu(#tpdu{mti_mms_udhl_rp = MTI_MMS_UDHL_RP,
     ?SYS_DEBUG("TPDU TP_PID          ~p~n",     [hex:bin_to_hexstr(TP_PID)]),
     ?SYS_DEBUG("TPDU TP_DCS          ~p~n",     [hex:bin_to_hexstr(TP_DCS)]),
     ?SYS_DEBUG("TPDU TP_SCTS         ~p~n",     [hex:bin_to_hexstr(TP_SCTS)]),
-    ?SYS_DEBUG("TPDU TP_UDL          ~p~n",     [hex:int_to_hexstr(TP_UDL)]),
+    %% ?SYS_DEBUG("TPDU TP_UDL          ~p~n",     [hex:int_to_hexstr(TP_UDL)]),
     ?SYS_DEBUG("TPDU TP_UD           ~p~n",     [hex:bin_to_hexstr(TP_UD)]),
 
     << TAG/binary,
@@ -376,7 +385,7 @@ create_tpdu(#tpdu{mti_mms_udhl_rp = MTI_MMS_UDHL_RP,
        TP_PID/binary,
        TP_DCS/binary,
        TP_SCTS/binary,
-       TP_UDL:8,
+       %% TP_UDL:8,
        TP_UD/binary >>.
 
 create_apdu(#apdu{device_identity_tlv = DEVICE_IDENTITY_TLV,
@@ -439,3 +448,30 @@ create_whole_command(Tpud) ->
     Command = <<16#a0, 16#c2, 16#00, 16#00>>, %% download command (CLA a0, INS c2 P1 00 p2 00) iso/iec 7816-4
     Size = size(Apdu),
     << Command/binary, Size:8, Apdu/binary >>.
+
+
+
+%% A0C2000047
+%% D1
+%% 45
+%% 02
+%% 02
+%% 8381
+%% 06069833 11 11 11 11
+%% 0B37E40A9833111111117F16
+%% 0B100713091004
+%% 25
+%% 02 70 00 0020 15 1601 15 15 63 41 45 41E52501282B2553668CB6274678CB51961DC2A1B22CAEC5
+
+%% A0C2000048
+%% D1
+%% 46
+%% 02
+%% 02
+%% 8381
+%% 06069833 11 11 11 11
+%% 0B38E40A9833111111117F16
+%% 0B092714331504
+%% 26
+%% 25
+%% 02 70 00 0020 15 1601 15 15 63 41 45 2BB4A825DFFB5CA76E5CD6BE8B5EC9CEC4BB9DDA95F88E70
