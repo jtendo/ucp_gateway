@@ -42,7 +42,7 @@ get_members() ->
     gen_server:call(?SERVER, get_members).
 
 join_pool(Pid) when is_pid(Pid) ->
-    gen_server:call(?SERVER, {join_pool, Pid}).
+    gen_server:cast(?SERVER, {join_pool, Pid}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -62,17 +62,17 @@ handle_call(get_members, _From, State) ->
     Reply = get_members_internal(),
     {reply, Reply, State};
 
-handle_call({join_pool, Pid}, _From, State) ->
+handle_call(_Request, _From, State) ->
+    Reply = ok,
+    {reply, Reply, State}.
+
+handle_cast({join_pool, Pid}, State) ->
     case lists:member(Pid, get_members_internal()) of
         true -> ok;
         false ->
             pg2:join(?POOL_NAME, Pid)
     end,
-    {reply, ok, State};
-
-handle_call(_Request, _From, State) ->
-    Reply = ok,
-    {reply, Reply, State}.
+    {noreply, State};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
