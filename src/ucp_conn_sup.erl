@@ -18,7 +18,9 @@ start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 start_child(Conf) ->
-    supervisor:start_child(?SERVER, [Conf]).
+    {ok, Pid} = supervisor:start_child(?SERVER, [Conf]),
+    ucp_conn_pool:join_pool(Pid),
+    {ok, Pid}.
 
 %% ===================================================================
 %% Supervisor callbacks

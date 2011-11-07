@@ -7,7 +7,7 @@
 %% API
 -export([start_link/0,
          get_members/0,
-         join_pool/0,
+         join_pool/1,
          health_check/0]).
 
 %% gen_server callbacks
@@ -41,8 +41,8 @@ health_check() ->
 get_members() ->
     gen_server:call(?SERVER, get_members).
 
-join_pool() ->
-    gen_server:call(?SERVER, {join_pool}).
+join_pool(Pid) when is_pid(Pid) ->
+    gen_server:call(?SERVER, {join_pool, Pid}).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -62,7 +62,7 @@ handle_call(get_members, _From, State) ->
     Reply = get_members_internal(),
     {reply, Reply, State};
 
-handle_call({join_pool}, {Pid, _}, State) ->
+handle_call({join_pool, Pid}, _From, State) ->
     case lists:member(Pid, get_members_internal()) of
         true -> ok;
         false ->
