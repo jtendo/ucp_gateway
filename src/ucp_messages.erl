@@ -43,6 +43,9 @@ create_cmd_51_text(Trn, Sender, Receiver, Message) when is_list(Message)->
 %%--------------------------------------------------------------------
 create_cmd_51_binary(Trn, Sender, Receiver, Message) when is_binary(Message) ->
 
+    {ok, L} = binpp:convert(Message),
+    lager:debug("Binary msg content: ~p", [L]),
+
     UCPMsg = hex:bin_to_hexstr(Message),
     {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
 

@@ -23,7 +23,6 @@ create_tpud_message(CNTR, Data) when is_binary(Data)->
 
     KIC = ?KIC_ALGORITHM_DES bor ?KIC_ALGORITHM_3DES2 bor 2#0010000,
     KID = ?KID_ALGORITHM_DES bor ?KID_ALGORITHM_3DES2 bor 2#0010000,
-
     KicKey1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
     KicKey2 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
 
@@ -121,6 +120,13 @@ des_encrypt_data(Key, IVec, Data) ->
 
 des_decrypt_data(Key, IVec, Data) ->
     crypto:des_cbc_decrypt(Key, IVec, ucp_utils:pad_to(8,Data)).
+
+decrypt(Data) ->
+    IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
+    Key1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
+    Key2 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
+
+    crypto:des3_cbc_decrypt(Key1, Key2, Key1, IVec, Data).
 
 create_tpud(CProf, TAR, CNTR, Data) ->
     KIC = CProf#card_profile.kic,

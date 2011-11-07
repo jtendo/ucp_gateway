@@ -60,6 +60,7 @@
           auth_timer, %% ref to auth timeout
           last_usage, %% timestamp of last socket usage
           trn = 0,   %% message sequence number
+          cntr = 0, %% smspp message counter
           reply_timeout, %% reply time of smsc
           keepalive_interval, %% interval between sending keepalive ucp31 messages
           keepalive_timer,
@@ -74,8 +75,7 @@
 %%%===================================================================
 
 start_link({Name, {Host, Port, Login, Password}}) ->
-    gen_fsm:start_link(?MODULE, [Name, {Host, Port, Login, Password}], [{debug,
-                [trace, log]}]).
+    gen_fsm:start_link(?MODULE, [Name, {Host, Port, Login, Password}], [{debug, [trace, log]}]).
 
 %%% --------------------------------------------------------------------
 %%% Get status of connection.
@@ -389,9 +389,9 @@ generate_messages({send_txt_message, {Receiver, Message}}, State) ->
     {ok, [{TRN, Msg}], State#state{trn = TRN}};
 
 generate_messages({send_bin_message, {Receiver, Message}}, State) ->
-    %TODO: change this!!! Function in ucp_smspp not implmented
-    Tpdus = ucp_smspp:create_tpud_message(Message),
-    create_bin_message(Receiver, Tpdus, State).
+    CNTR = State#state.cntr + 1,
+    Tpdus = ucp_smspp:create_tpud_message(CNTR, Message),
+    create_bin_message(Receiver, Tpdus, State#state{cntr = CNTR}).
 
 % Process binary parts
 create_bin_message(Receiver, Bins, State) ->
@@ -503,6 +503,19 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     ?SYS_INFO("Sending ACK message: ~p", [Message]),
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)),
     %TODO: Check sending result = Don't know what to do when error!!
+    % Handle message
+    case Body#ucp_cmd_5x.mt of
+        "4" -> % STK message
+            % TODO: decode OAdC
+            Data = ucp_smspp:decrypt(Body#ucp_cmd_5x.msg),
+            {ok, E} = binpp:convert(Body#ucp_cmd_5x.msg),
+            lager:debug("Binary msg content encoded: ~p", [E]),
+            {ok, D} = binpp:convert(Data),
+            lager:debug("Binary msg content encoded: ~p", [D]),
+            gen_event:notify(dynx_router, {rx_msg, {Body#ucp_cmd_5x.oadc, Data}});
+        _Else ->
+            ignore
+    end,
     {ok, State};
 
 process_message(Message, State) ->
