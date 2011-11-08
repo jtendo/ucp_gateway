@@ -1,4 +1,6 @@
 -module(ucp_conn_pool).
+-author('andrzej.trawinski@jtendo.com').
+-author('adam.rutkowski@jtendo.com').
 
 -behaviour(gen_server).
 
@@ -10,6 +12,9 @@
          join_pool/1,
          health_check/0]).
 
+%% transitions
+-export([handle_transition/1]).
+
 %% gen_server callbacks
 -export([init/1,
          handle_call/3,
@@ -19,7 +24,8 @@
          code_change/3]).
 
 -define(SERVER, ?MODULE).
--define(POOL_NAME, ucp_conn_pool).
+-define(CONNECTIONS, ucp_group_all).
+-define(CONNECTIONS_ACTIVE, ucp_group_ready).
 
 -record(state, {endpoints}).
 
@@ -45,11 +51,19 @@ join_pool(Pid) when is_pid(Pid) ->
     gen_server:cast(?SERVER, {join_pool, Pid}).
 
 %%%===================================================================
+%%% transition callbacks
+%%%===================================================================
+
+handle_transition(Transition) ->
+    gen_server:call(?SERVER, {connection_transition, Transition}).
+
+%%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
 init([]) ->
-    pg2:create(?POOL_NAME),
+    pg2:create(?CONNECTIONS),
+    pg2:create(?CONNECTIONS_ACTIVE),
     confetti:use(ucp_pool_conf, [
             {location, {"ucp_pool_conf.conf", "conf"}},
             {validators, [fun ensure_valid_syntax/1,
@@ -62,16 +76,22 @@ handle_call(get_members, _From, State) ->
     Reply = get_members_internal(),
     {reply, Reply, State};
 
+handle_call({connection_transition, active}, {Pid, _}, State) ->
+    Reply = smart_join(?CONNECTIONS_ACTIVE, Pid),
+    ?SYS_DEBUG("Connection ~p is joining active pool", [Pid]),
+    {reply, Reply, State};
+
+handle_call({connection_transition, _Transition}, {Pid, _}, State) ->
+    Reply = pg2:leave(?CONNECTIONS_ACTIVE, Pid),
+    ?SYS_DEBUG("Connection ~p left active pool", [Pid]),
+    {reply, Reply, State};
+
 handle_call(_Request, _From, State) ->
     Reply = ok,
     {reply, Reply, State}.
 
 handle_cast({join_pool, Pid}, State) ->
-    case lists:member(Pid, get_members_internal()) of
-        true -> ok;
-        false ->
-            pg2:join(?POOL_NAME, Pid)
-    end,
+    smart_join(?CONNECTIONS, Pid),
     {noreply, State};
 
 handle_cast(_Msg, State) ->
@@ -113,7 +133,14 @@ connect_smsc({Name, {_Host, _Port, _Login, _Password, State}}) ->
    ok.
 
 get_members_internal() ->
-    pg2:get_local_members(?POOL_NAME).
+    pg2:get_local_members(?CONNECTIONS).
+
+smart_join(Pool, Pid) ->
+    case lists:member(Pid, get_members_internal()) of
+        true -> ok;
+        false ->
+            pg2:join(Pool, Pid)
+    end.
 
 %%%===================================================================
 %%% Configuration reload handlers

@@ -1,7 +1,8 @@
 -module(ucp_conn).
 -author('andrzej.trawinski@jtendo.com').
+-author('adam.rutkowski@jtendo.com').
 
--behaviour(gen_fsm).
+-behaviour(gen_fsm2).
 
 %%%----------------------------------------------------------------------
 %%% UCP SMSC client state machine.
@@ -36,6 +37,8 @@
          terminate/3,
          code_change/4]).
 
+-export([handle_state/2]).
+
 -define(SERVER, ?MODULE).
 -define(AUTH_TIMEOUT, 5000).
 -define(CMD_TIMEOUT, 3000).
@@ -66,15 +69,22 @@
           send_interval, %% time distance between sends
           default_originator, %% default sms originator
           dict, %% dict holding operation params and results
-          req_q %% queue for requests
+          req_q, %% queue for requests
+          transition_callback
          }).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
+handle_state(A,B) ->
+    io:format("AHGWJHEGHJDGEHJGHGEHJGEGH ~p ~p", [A,B]),
+    ?SYS_WARN("ehiu2y23y23897432897342892347893247893247289347234897234", []),
+    ignore.
+
+
 start_link({Name, {Host, Port, Login, Password}}) ->
-    gen_fsm:start_link(?MODULE, [Name, {Host, Port, Login, Password}], [{debug,
+    gen_fsm2:start_link(?MODULE, [Name, {Host, Port, Login, Password}], [{debug,
                 [trace, log]}]).
 
 %%% --------------------------------------------------------------------
@@ -115,40 +125,54 @@ close(Handle) ->
 %%%===================================================================
 
 init([Name, {Host, Port, Login, Password}]) ->
-    confetti:use(ucp_conf),
+    confetti:use(ucp_conf, [
+            {location, {"ucp_conf.conf", "conf"}},
+            {validators, [fun ensure_transition_callback/1]}
+        ]),
     SMSConnConfig = confetti:fetch(ucp_conf),
     State = #state{ name = Name,
                     host = Host,
                     port = Port,
                     login = Login,
                     pass = Password,
-                    last_usage = erlang:now(),
+                    last_usage = erlang:now(), % FIXME
                     trn = 0,
-                    reply_timeout = proplists:get_value(smsc_reply_timeout, SMSConnConfig, 20000),
-                    keepalive_interval = proplists:get_value(smsc_keepalive_interval, SMSConnConfig, 62000),
-                    default_originator = proplists:get_value(smsc_default_originator, SMSConnConfig, "2147"),
-                    send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000"),
+                    reply_timeout = proplists:get_value(smsc_reply_timeout,
+                        SMSConnConfig, 20000),
+                    keepalive_interval = proplists:get_value(smsc_keepalive_interval,
+                        SMSConnConfig, 62000),
+                    default_originator = proplists:get_value(smsc_default_originator,
+                        SMSConnConfig, "2147"),
+                    send_interval = proplists:get_value(smsc_send_interval,
+                        SMSConnConfig, "20000"),
                     dict = dict:new(),
-                    req_q = queue:new()},
+                    req_q = queue:new(),
+                    transition_callback = proplists:get_value(transition_callback,
+                        SMSConnConfig)
+                },
     {ok, connecting, State, 0}. % Start connecting after timeout
 
 connecting(timeout, State) ->
-    ?SYS_INFO("Timeout 0!", []),
+    apply_transition_callback(connecting, State),
     {ok, NextState, NewState} = connect(State),
     {next_state, NextState, NewState}.
 
 connecting(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in connecting state: ~p", [From, Event]),
+    apply_transition_callback(connecting, State),
     Q = queue:in({Event, From}, State#state.req_q),
     {next_state, connecting, State#state{req_q = Q}}.
 
 wait_auth_response(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in wait_auth state: ~p", [From, Event]),
+    apply_transition_callback(wait_auth_response, State),
     Q = queue:in({Event, From}, State#state.req_q),
     {next_state, wait_auth_response, State#state{req_q = Q}}.
 
 active(Event, From, State) ->
+    io:format("------------------de-dedw-w-eqw-q-e22e3-e3-e3-e3e2-"),
     ?SYS_INFO("Received event from ~p in active state: ~p", [From, Event]),
+    apply_transition_callback(active, State),
     process_message(Event, From, State).
 
 handle_event(close, _StateName, State) ->
@@ -213,7 +237,7 @@ handle_info({tcp, _Socket, Data}, active, State) ->
                    end,
             dequeue_messages(NewState);
         Error ->
-            lager:warning("Error handling data: ~p", [Error]),
+            ?SYS_WARN("Error handling data: ~p", [Error]),
             {next_state, active, State}
     end;
 
@@ -230,7 +254,7 @@ handle_info({tcp_error, _Socket, Reason}, StateName, State) ->
 %% Handling timers timeouts
 %%--------------------------------------------------------------------
 handle_info({timeout, Timer, {cmd_timeout, TRN}}, StateName, State) ->
-    lager:debug("Message timed out: ~p", [TRN]),
+    ?SYS_DEBUG("Message timed out: ~p", [TRN]),
     case cmd_timeout(Timer, TRN, State) of
         {reply, To, Reason, NewS} -> gen_fsm:reply(To, Reason),
                                      {next_state, StateName, NewS};
@@ -308,10 +332,30 @@ code_change(_OldVsn, StateName, State, _Extra) ->
 
 
 %%%===================================================================
+%%% Internal functions - transition reporting
+%%%===================================================================
+
+ensure_transition_callback(Conf) ->
+    case proplists:get_value(transition_callback, Conf) of
+        undefined ->
+            {ok, Conf};
+        {M,F} when is_atom(M), is_atom(F) ->
+            {module, M} = code:ensure_loaded(M),
+            true = erlang:function_exported(M, F, 1),
+            {ok, Conf}
+    end.
+
+apply_transition_callback(Transition, State) ->
+    case State#state.transition_callback of
+        {M,F} -> erlang:apply(M, F, [Transition]);
+        _ -> ok
+    end.
+
+%%%===================================================================
 %%% Internal functions
 %%%===================================================================
 dequeue_messages(State) ->
-    lager:debug("Dequeing messages..."),
+    ?SYS_DEBUG("Dequeing messages...", []),
     case queue:out(State#state.req_q) of
         {{value, {Event, From}}, Q} ->
             case process_message(Event, From, State#state{req_q=Q}) of
@@ -410,7 +454,7 @@ cancel_timer(undefined) ->
     ok;
 cancel_timer(Timer) ->
     Value = erlang:cancel_timer(Timer),
-    lager:debug("Timer ~p canceled with value: ~p", [Timer, Value]),
+    ?SYS_DEBUG("Timer ~p canceled with value: ~p", [Timer, Value]),
     receive
         {timeout, Timer, _} ->
             ok
@@ -474,13 +518,13 @@ check_trn(_, _)   -> throw({error, wrong_auth_trn}).
 received_active(Data, State) ->
     case ucp_utils:decode_message(Data) of
         {ok, Message} ->
-            lager:debug("Processing message: ~p", [Message]),
+            ?SYS_DEBUG("Processing message: ~p", [Message]),
             % TODO: catch processing errors
             {response, process_message(Message, State)};
         Error ->
             % Decoding failed = ignore message
             %TODO: Make sure is't OK?
-            lager:warning("Error parsing data: ~p", [Error]),
+            ?SYS_WARN("Error parsing data: ~p", [Error]),
             Error
     end.
 
@@ -506,7 +550,7 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     {ok, State};
 
 process_message(Message, State) ->
-    lager:debug("Unhandled message: ~p", [Message]),
+    ?SYS_DEBUG("Unhandled message: ~p", [Message]),
     {ok, State}.
 
 check_result(Result) when is_record(Result, ack) ->
