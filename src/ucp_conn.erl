@@ -77,12 +77,6 @@
 %%% API
 %%%===================================================================
 
-handle_state(A,B) ->
-    io:format("AHGWJHEGHJDGEHJGHGEHJGEGH ~p ~p", [A,B]),
-    ?SYS_WARN("ehiu2y23y23897432897342892347893247893247289347234897234", []),
-    ignore.
-
-
 start_link({Name, {Host, Port, Login, Password}}) ->
     gen_fsm2:start_link(?MODULE, [Name, {Host, Port, Login, Password}], [{debug,
                 [trace, log]}]).
@@ -153,26 +147,21 @@ init([Name, {Host, Port, Login, Password}]) ->
     {ok, connecting, State, 0}. % Start connecting after timeout
 
 connecting(timeout, State) ->
-    apply_transition_callback(connecting, State),
     {ok, NextState, NewState} = connect(State),
     {next_state, NextState, NewState}.
 
 connecting(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in connecting state: ~p", [From, Event]),
-    apply_transition_callback(connecting, State),
     Q = queue:in({Event, From}, State#state.req_q),
     {next_state, connecting, State#state{req_q = Q}}.
 
 wait_auth_response(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in wait_auth state: ~p", [From, Event]),
-    apply_transition_callback(wait_auth_response, State),
     Q = queue:in({Event, From}, State#state.req_q),
     {next_state, wait_auth_response, State#state{req_q = Q}}.
 
 active(Event, From, State) ->
-    io:format("------------------de-dedw-w-eqw-q-e22e3-e3-e3-e3e2-"),
     ?SYS_INFO("Received event from ~p in active state: ~p", [From, Event]),
-    apply_transition_callback(active, State),
     process_message(Event, From, State).
 
 handle_event(close, _StateName, State) ->
@@ -330,6 +319,12 @@ terminate(_Reason, _StateName, _State) ->
 code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
 
+%%--------------------------------------------------------------------
+%% Handle state 'on entry' - provided by gen_fsm2
+%%--------------------------------------------------------------------
+handle_state(StateName, State) ->
+    apply_transition_callback(StateName, self(), State),
+    ignore.
 
 %%%===================================================================
 %%% Internal functions - transition reporting
@@ -341,13 +336,13 @@ ensure_transition_callback(Conf) ->
             {ok, Conf};
         {M,F} when is_atom(M), is_atom(F) ->
             {module, M} = code:ensure_loaded(M),
-            true = erlang:function_exported(M, F, 1),
+            true = erlang:function_exported(M, F, 2),
             {ok, Conf}
     end.
 
-apply_transition_callback(Transition, State) ->
+apply_transition_callback(Transition, Pid, State) when is_pid(Pid) ->
     case State#state.transition_callback of
-        {M,F} -> erlang:apply(M, F, [Transition]);
+        {M,F} -> M:F(Pid, Transition);
         _ -> ok
     end.
 
