@@ -5,14 +5,13 @@
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
-%% Function converting Ascii Num  into IRA Char
+%% Function converting Ascii Num into IRA Char
 %%
 %% @spec ascii_to_gsm(Char) -> String
 %% @end
 %%--------------------------------------------------------------------
-
 ascii_to_gsm(Int) ->
-    case lists:keyfind(hex:int_to_hexstr(Int),1,ia5_alphabet()) of
+    case lists:keyfind(hex:to_hexstr(Int), 1, ia5_alphabet()) of
         {_, Gsm} ->
             http_util:hexlist_to_integer(Gsm);
         false ->
@@ -27,10 +26,9 @@ ascii_to_gsm(Int) ->
 %% @spec gsm_to_ascii(Char) -> String
 %% @end
 %%--------------------------------------------------------------------
-
 gsm_to_ascii(HexStr) ->
     case lists:keyfind(string:to_upper(HexStr),1,
-                       lists:map(fun({X,Y}) -> {Y,X} end, ia5_alphabet())) of
+            lists:map(fun({X,Y}) -> {Y,X} end, ia5_alphabet())) of
         {_,Ascii} ->
             Ascii;
         false ->
@@ -76,7 +74,5 @@ ia5_alphabet() ->
      {"7E","3D"},
      {"5D","3E"},
      {"7C","40"},
-     {"AC","65"}
-     ].
-
+     {"AC","65"}].
 

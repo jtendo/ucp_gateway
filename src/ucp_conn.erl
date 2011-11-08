@@ -63,7 +63,7 @@
           auth_timer, %% ref to auth timeout
           last_usage, %% timestamp of last socket usage
           trn = 0,   %% message sequence number
-          cntr = 0, %% smspp message counter
+          cntr = 500, %% smspp message counter
           reply_timeout, %% reply time of smsc
           keepalive_interval, %% interval between sending keepalive ucp31 messages
           keepalive_timer,
