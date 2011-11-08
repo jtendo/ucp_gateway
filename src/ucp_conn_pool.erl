@@ -40,8 +40,7 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
--spec join_pool(Pid :: pid()) -> 'ok' |
-    {'error', {'no_such_group', ?CONNECTIONS}}.
+-spec join_pool(Pid :: pid()) -> 'ok'.
 
 join_pool(Pid) when is_pid(Pid) ->
     gen_server:cast(?SERVER, {join_pool, Pid}).

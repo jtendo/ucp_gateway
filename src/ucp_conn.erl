@@ -143,7 +143,7 @@ init([Name, {Host, Port, Login, Password}]) ->
                     keepalive_interval = proplists:get_value(keepalive_interval,
                         SMSConnConfig, 62000),
                     default_originator = proplists:get_value(default_originator,
-                        SMSConnConfig, "2147"),
+                        SMSConnConfig, "orange.pl"),
                     send_interval = proplists:get_value(send_interval,
                         SMSConnConfig, "20000"),
                     dict = dict:new(),
@@ -296,10 +296,11 @@ handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
     ?SYS_INFO("UCP Connection process ~p (~p) received configuration reload
         notification", [State#state.name, self()]),
     NewState = State#state{
-        reply_timeout = proplists:get_value(smsc_reply_timeout, SMSConnConfig, 20000),
-        keepalive_interval = proplists:get_value(smsc_keepalive_interval, SMSConnConfig, 62000),
-        default_originator = proplists:get_value(smsc_default_originator, SMSConnConfig, "2147"),
-        send_interval = proplists:get_value(smsc_send_interval, SMSConnConfig, "20000")
+        reply_timeout = proplists:get_value(reply_timeout, SMSConnConfig, 20000),
+        keepalive_interval = proplists:get_value(keepalive_interval, SMSConnConfig, 62000),
+        default_originator = proplists:get_value(default_originator,
+            SMSConnConfig, "orange.pl"),
+        send_interval = proplists:get_value(send_interval, SMSConnConfig, "20000")
     },
     {next_state, StateName, NewState};
 
