@@ -39,19 +39,25 @@
 
 -export([handle_state/2]).
 
+-define(CFG, fun(Key,Default) ->
+            Terms = confetti:fetch(ucp_conf),
+            proplists:get_value(Key, Terms, Default)
+    end).
+
 -define(SERVER, ?MODULE).
--define(AUTH_TIMEOUT, 5000).
--define(CMD_TIMEOUT, 3000).
--define(SEND_TIMEOUT, 1000).
--define(RETRY_TIMEOUT, 10000).
--define(CALL_TIMEOUT, 3000).
+-define(AUTH_TIMEOUT, ?CFG(auth_timeout, 5000)).
+-define(CMD_TIMEOUT, ?CFG(cmd_timeout, 3000)).
+-define(SEND_TIMEOUT, ?CFG(send_timeout, 1000)).
+-define(RETRY_TIMEOUT, ?CFG(retry_timeout, 10000)).
+-define(CALL_TIMEOUT, ?CFG(call_timeout, 3000)).
+-define(CONNECTION_TIMEOUT, ?CFG(connection_timeout, 2000)).
+%% Grace period after auth errors:
+-define(GRACEFUL_RETRY_TIMEOUT, ?CFG(graceful_retry_timeout, 5000)).
+-define(MIN_MESSAGE_TRN, ?CFG(min_message_trn, 0)).
+-define(MAX_MESSAGE_TRN, ?CFG(max_message_trn, 99)).
+
 -define(TCP_OPTIONS, [binary, {packet, 0}, {active, true}, {reuseaddr, true},
         {keepalive, true}, {send_timeout, ?SEND_TIMEOUT}, {send_timeout_close, false}]).
--define(CONNECTION_TIMEOUT, 2000).
-%% Grace period after auth errors:
--define(GRACEFUL_RETRY_TIMEOUT, 5000).
--define(MIN_MESSAGE_TRN, 0).
--define(MAX_MESSAGE_TRN, 99).
 
 -record(state, {
           name,     %% Name of connection
@@ -132,13 +138,13 @@ init([Name, {Host, Port, Login, Password}]) ->
                     pass = Password,
                     last_usage = erlang:now(), % FIXME
                     trn = 0,
-                    reply_timeout = proplists:get_value(smsc_reply_timeout,
+                    reply_timeout = proplists:get_value(reply_timeout,
                         SMSConnConfig, 20000),
-                    keepalive_interval = proplists:get_value(smsc_keepalive_interval,
+                    keepalive_interval = proplists:get_value(keepalive_interval,
                         SMSConnConfig, 62000),
-                    default_originator = proplists:get_value(smsc_default_originator,
+                    default_originator = proplists:get_value(default_originator,
                         SMSConnConfig, "2147"),
-                    send_interval = proplists:get_value(smsc_send_interval,
+                    send_interval = proplists:get_value(send_interval,
                         SMSConnConfig, "20000"),
                     dict = dict:new(),
                     req_q = queue:new(),
@@ -331,6 +337,7 @@ handle_state(StateName, State) ->
 %%% Internal functions - transition reporting
 %%%===================================================================
 
+%% check if transition callback is valid {M,F}
 ensure_transition_callback(Conf) ->
     case proplists:get_value(transition_callback, Conf) of
         undefined ->
@@ -341,6 +348,7 @@ ensure_transition_callback(Conf) ->
             {ok, Conf}
     end.
 
+%% Execute transition callback if defined
 apply_transition_callback(Transition, Pid, State) when is_pid(Pid) ->
     case State#state.transition_callback of
         {M,F} -> M:F(Pid, Transition);
