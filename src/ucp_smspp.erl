@@ -8,12 +8,18 @@
 -define(CHUNK_SIZE, 114).
 
 test(CNTR, String) ->
+    KicKey1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
+    KicKey2 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
 
-    lists:map(fun(Tpud) ->
-                      ?SYS_DEBUG("TPUD = ~p~n", [hex:bin_to_hexstr(Tpud)]),
-                      C = create_whole_command(Tpud),
-                      ?SYS_DEBUG("COMMAND = ~p~n", [lists:flatten(hex:bin_to_hexstr(C))])
-              end,  create_tpud_message(CNTR, erlang:list_to_binary(String))).
+    Y = binpp:from_str("03 10 00 60 02 00 1A 4D 3A 20 35 30 31 30 30 30 30 30 30 20 4F 3A 20 4F 72 61 6E 67 65 20 4F 6E 65 03 00 0C 04 00 4E 6F 77 79 20 6E 75 6D 65 72 03 00 0E 05 00 5A 6D 69 65 6E 20 6F 66 65 72 74 65 00 00 20 F6 00 00 1C FF 00 02 01 61"),
+    C = des3_encrypt_data(KicKey1, KicKey2, Y),
+    D = des3_decrypt_data(KicKey1, KicKey2, C),
+
+    ?SYS_DEBUG("Y = ~p~n", [Y]),
+    ?SYS_DEBUG("C = ~p~n", [C]),
+    ?SYS_DEBUG("D = ~p~n", [D]),
+
+   create_tpud_message(CNTR, erlang:list_to_binary(String)).
 
 
 create_tpud_message(CNTR, Data) when is_binary(Data)->
@@ -63,10 +69,11 @@ create_tpud_message(CProf, TAR, CNTR, Data) when is_binary(Data)->
      data, TPUD,
      rcccds, RC_CC_DS,
      pcntr, PCNTR,
+     xser, Xser,
      secured_data, SecureData} = create_tpud(CProf, TAR, CNTR, Data),
     case size(TPUD) =< ?CHUNK_SIZE of
         true ->
-            [TPUD];
+            [{Xser, TPUD}];
         false ->
             DataParts = ucp_utils:binary_split(SecureData,?CHUNK_SIZE),
             Ref = binary:decode_unsigned(CNTR) rem 255,
@@ -120,6 +127,10 @@ des3_encrypt_data(Key1, Key2, Data) ->
     IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
     crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, ucp_utils:pad_to(8,Data)).
 
+des3_decrypt_data(Key1, Key2, Data) ->
+    IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
+    crypto:des3_cbc_decrypt(Key1, Key2, Key1, IVec, ucp_utils:pad_to(8,Data)).
+
 des3_encrypt_data(Key1, Key2, Data, IVec) ->
     crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, ucp_utils:pad_to(8,Data)).
 
@@ -161,9 +172,9 @@ create_tpud(CProf, TAR, CNTR, Data) ->
     UDL =  size(<<CPL:16, CHL:8, UDHL/binary, IEIa/binary, IEIDLa/binary, ConstPart/binary, SecureData/binary>>),
 
     ?SYS_DEBUG("UDL                  ~p, ~p~n", [hex:int_to_hexstr(UDL), UDL]),
-    ?SYS_DEBUG("UDHL                 ~p, ~p~n", [hex:bin_to_hexstr(UDHL)]),
-    ?SYS_DEBUG("IEIa                 ~p, ~p~n", [hex:bin_to_hexstr(IEIa)]),
-    ?SYS_DEBUG("IEIDLa               ~p, ~p~n", [hex:bin_to_hexstr(IEIDLa)]),
+    ?SYS_DEBUG("UDHL                 ~p~n", [hex:bin_to_hexstr(UDHL)]),
+    ?SYS_DEBUG("IEIa                 ~p~n", [hex:bin_to_hexstr(IEIa)]),
+    ?SYS_DEBUG("IEIDLa               ~p~n", [hex:bin_to_hexstr(IEIDLa)]),
     ?SYS_DEBUG("CPL                  ~p, ~p~n", [hex:int_to_hexstr(CPL), CPL]),
     ?SYS_DEBUG("CHL                  ~p, ~p~n", [hex:int_to_hexstr(CHL), CHL]),
     ?SYS_DEBUG("SPI                  ~p~n",     [hex:bin_to_hexstr(CProf#card_profile.spi)]),
@@ -178,9 +189,10 @@ create_tpud(CProf, TAR, CNTR, Data) ->
     ?SYS_DEBUG("SDATA                ~p~n",     [hex:bin_to_hexstr(SecureData)]),
 
     {ok,
-     data, <<UDL:8, UDHL/binary, IEIa/binary, IEIDLa/binary, CPL:16, CHL:8, ConstPart/binary, SecureData/binary>>,
+     data, <<CPL:16, CHL:8, ConstPart/binary, SecureData/binary>>,
      rcccds, RC_CC_DS,
      pcntr, PCNTR,
+     xser, <<16#01, 16#03, UDHL/binary, IEIa/binary, IEIDLa/binary>>,
      secured_data, SecureData
     }.
 
@@ -227,7 +239,7 @@ create_tpud_concatenated(Seq, #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, i
                                                        rc_cc_ds = RC_CC_SS,
                                                        secured_data_part = ActualPart}, Data),
     create_tpud_concatenated(next,
-                             #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, ieida = <<Ref,Tot,SeqNo>>,
+                             #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, ieida = <<Ref,Tot,NSeqNo>>,
                                                 ieib = IEIb, ieidlb = IEIDLb, spi = SPI, kic = KIC,
                                                 kid = KID, tar = TAR, cntr = CNTR, pcntr = PCNTR,
                                                 rc_cc_ds = RC_CC_SS
@@ -241,10 +253,6 @@ create_tpud_concatenated(Seq, #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, i
                                                 }, Data) ->
     <<SPIA:8, SPIB:8>> = SPI,
     ConstPart = <<SPIA:8, SPIB:8, KIC/binary, KID/binary, TAR/binary>>,
-
-    %% CPL = size(ConstPart) + size(CNTR) + size(PCNTR) + size(RC_CC_SS) + size(Data),
-
-    %% CHL = size(ConstPart) + size(CNTR) + size(PCNTR) + size(RC_CC_SS),
 
     CPL = size(ConstPart) + size(RC_CC_SS) + size(Data),
     CHL = size(ConstPart) + size(RC_CC_SS),
@@ -269,12 +277,16 @@ create_tpud_concatenated(Seq, #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, i
             ?SYS_DEBUG("PCNTR                ~p~n",[hex:bin_to_hexstr(PCNTR)]),
             ?SYS_DEBUG("RCCCSS               ~p~n",[hex:bin_to_hexstr(RC_CC_SS)]),
             ?SYS_DEBUG("DATA                 ~p~n",[hex:bin_to_hexstr(DataPart)]),
-            ?SYS_DEBUG("DUPA4",[]),
 
-            <<UDHL:8, IEIa/binary, IEIDLa/binary, IEIDa/binary, IEIb/binary, IEIDLb/binary,
-              CPL:16, CHL:8, SPI/binary, KIC/binary, KID/binary, TAR/binary,
-              RC_CC_SS/binary, DataPart/binary >>;
+            XserDD = <<UDHL:8, IEIa/binary, IEIDLa/binary, IEIDa/binary, IEIb/binary, IEIDLb/binary>>,
 
+            XserLL = size(XserDD),
+            TPDU = <<CPL:16, CHL:8, SPI/binary, KIC/binary, KID/binary, TAR/binary,
+              RC_CC_SS/binary, DataPart/binary >>,
+            XserLen = size(<<XserLL:8, XserDD/binary>>),
+            Xser = <<16#01, XserLen:8, XserLL:8, XserDD/binary>>,
+            ?SYS_DEBUG("Xser                 ~p~n",[hex:bin_to_hexstr(Xser)]),
+            {Xser, TPDU};
         false ->
             UDHL = size(IEIa) + size(IEIDLa) + size(IEIDa),
             ?SYS_DEBUG("IEIa                 ~p~n",[hex:bin_to_hexstr(IEIa)]),
@@ -292,13 +304,15 @@ create_tpud_concatenated(Seq, #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, i
             ?SYS_DEBUG("PCNTR                ~p~n",[hex:bin_to_hexstr(PCNTR)]),
             ?SYS_DEBUG("RCCCSS               ~p~n",[hex:bin_to_hexstr(RC_CC_SS)]),
             ?SYS_DEBUG("DATA                 ~p~n",[hex:bin_to_hexstr(Data)]),
-
-            <<UDHL:8, IEIa/binary, IEIDLa/binary, IEIDa/binary, DataPart/binary >>
+            XserDD = <<UDHL:8, IEIa/binary, IEIDLa/binary, IEIDa/binary>>,
+            XserLL = size(XserDD),
+            TPDU = <<DataPart/binary >>,
+            XserLen = size(<<XserLL:8, XserDD/binary>>),
+            Xser = <<16#01, XserLen:8, XserLL:8, XserDD/binary>>,
+            ?SYS_DEBUG("Xser                 ~p~n",[hex:bin_to_hexstr(Xser)]),
+            {Xser, TPDU}
 
     end.
-
-
-
 
 swap_msisdn(MSISDN) when erlang:length(MSISDN) == 9 ->
     swap_msisdn("48"++MSISDN);
@@ -450,6 +464,9 @@ create_whole_command(Tpud) ->
 
 
 %% tak na szybko
-parse_command_packet(Packet) ->
+parse_command_packet(Packet) when is_list(Packet)->
+    parse_command_packet(hex:hexstr_to_bin(Packet));
+
+parse_command_packet(Packet) when is_binary(Packet)->
     <<_CPI:8, _CPL:8, _CHL:8, _SPI:16, _KIC:8, _KID:8, _TAR:24, _CNTR:40, _PCNTR:8, Data/binary>> = Packet,
     Data.

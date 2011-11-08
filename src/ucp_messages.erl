@@ -6,7 +6,7 @@
 
 -export([
          create_cmd_51_text/4,
-         create_cmd_51_binary/4,
+         create_cmd_51_binary/5,
          create_cmd_60/3,
          create_cmd_31/2,
          create_ack/1,
@@ -41,11 +41,11 @@ create_cmd_51_text(Trn, Sender, Receiver, Message) when is_list(Message)->
 %%--------------------------------------------------------------------
 %% Function try to create UCP 51 Message not having utf-8 chars
 %%--------------------------------------------------------------------
-create_cmd_51_binary(Trn, Sender, Receiver, Message) when is_binary(Message) ->
+create_cmd_51_binary(Trn, Sender, Receiver, Message, Xser) when is_binary(Message) ->
 
     {ok, L} = binpp:convert(Message),
     lager:debug("Binary msg content: ~p", [L]),
-
+    {ok, HexXser} = binpp:content(Xser),
     UCPMsg = lists:flatten(hex:to_hexstr(Message)),
     {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
 
@@ -55,7 +55,7 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message) when is_binary(Message) ->
               otoa = OTOA,
               rpid = "0127",
               mcls = "2", %% class message 2
-              xser = "0103027000",
+              xser = lists:flatten(HexXser),
               mt = "4",
               nb = integer_to_list(length(UCPMsg)*4),
               msg = UCPMsg},

@@ -3,7 +3,8 @@
 -export([bin_to_hexstr/1,
          int_to_hexstr/1,
          list_to_hexstr/1,
-         to_hexstr/1]).
+         to_hexstr/1,
+         hexstr_to_bin/1]).
 
 
 bin_to_hexstr(X) -> to_hexstr(X).
@@ -23,3 +24,6 @@ to_hexstr(L) when is_list(L) ->
     [to_hexstr(X) || X <- L].
 
 % list_to_integer("F", 16).
+
+hexstr_to_bin(Str) ->
+    << << (erlang:list_to_integer([H], 16)):4 >> || H <- Str >>.
