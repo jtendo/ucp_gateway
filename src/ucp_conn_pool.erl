@@ -5,12 +5,12 @@
 -behaviour(gen_server).
 
 -include("logger.hrl").
+-include("ucp_gateway.hrl").
 
 %% API
 -export([start_link/0,
          join_pool/1,
-         get_connection/0,
-         health_check/0]).
+         get_connection/0]).
 
 %% transitions
 -export([handle_transition/2]).
@@ -24,8 +24,6 @@
          code_change/3]).
 
 -define(SERVER, ?MODULE).
--define(CONNECTIONS, ucp_connections_all).
--define(CONNECTIONS_ACTIVE, ucp_connections_active).
 
 -record(state, {endpoints}).
 
@@ -41,17 +39,20 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-health_check() ->
-    gen_server:call(?SERVER, health_check).
+-spec join_pool(Pid :: pid()) -> 'ok' |
+    {'error', {'no_such_group', ?CONNECTIONS}}.
 
 join_pool(Pid) when is_pid(Pid) ->
     gen_server:cast(?SERVER, {join_pool, Pid}).
+
+-spec get_connection() ->  pid() | {'error', Reason} when
+    Reason ::  {'no_process', Name} | {'no_such_group', Name}.
 
 get_connection() ->
     gen_server:call(?SERVER, get_connection).
 
 %%%===================================================================
-%%% transition callbacks
+%%% connection process transition callback
 %%%===================================================================
 
 handle_transition(Pid, Transition) ->
@@ -127,7 +128,8 @@ connect_smsc({Name, {Host, Port, Login, Password, up}}) ->
    ok;
 
 connect_smsc({Name, {_Host, _Port, _Login, _Password, State}}) ->
-   ?SYS_DEBUG("Connection ~p excluded from starting, due to its status: ~p", [Name, State]),
+   %% should never happen, warn about this
+   ?SYS_WARN("Connection ~p excluded from starting, due to its status: ~p", [Name, State]),
    ok.
 
 get_members_internal(Pool) ->

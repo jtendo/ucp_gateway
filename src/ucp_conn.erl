@@ -331,6 +331,7 @@ handle_state(StateName, State) ->
 %%% Internal functions - transition reporting
 %%%===================================================================
 
+%% check if transition callback is valid {M,F}
 ensure_transition_callback(Conf) ->
     case proplists:get_value(transition_callback, Conf) of
         undefined ->
@@ -341,6 +342,7 @@ ensure_transition_callback(Conf) ->
             {ok, Conf}
     end.
 
+%% Execute transition callback if defined
 apply_transition_callback(Transition, Pid, State) when is_pid(Pid) ->
     case State#state.transition_callback of
         {M,F} -> M:F(Pid, Transition);
