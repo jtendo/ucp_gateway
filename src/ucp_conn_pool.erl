@@ -10,6 +10,7 @@
 %% API
 -export([start_link/0,
          join_pool/1,
+         get_active_connection/0,
          get_connection/0]).
 
 %% transitions
@@ -45,11 +46,17 @@ start_link() ->
 join_pool(Pid) when is_pid(Pid) ->
     gen_server:cast(?SERVER, {join_pool, Pid}).
 
+-spec get_active_connection() ->  pid() | {'error', Reason} when
+    Reason ::  {'no_process', Name} | {'no_such_group', Name}.
+
+get_active_connection() ->
+    gen_server:call(?SERVER, get_active_connection).
+
 -spec get_connection() ->  pid() | {'error', Reason} when
     Reason ::  {'no_process', Name} | {'no_such_group', Name}.
 
 get_connection() ->
-    gen_server:call(?SERVER, get_connection).
+    gen_server:call(?SERVER, get_any_connection).
 
 %%%===================================================================
 %%% connection process transition callback
@@ -73,8 +80,12 @@ init([]) ->
     Conns = confetti:fetch(ucp_pool_conf),
     {ok, #state{endpoints = Conns}, 0}.
 
-handle_call(get_connection, _From, State) ->
+handle_call(get_active_connection, _From, State) ->
     Reply = pg2:get_closest_pid(?CONNECTIONS_ACTIVE),
+    {reply, Reply, State};
+
+handle_call(get_any_connection, _From, State) ->
+    Reply = pg2:get_closest_pid(?CONNECTIONS),
     {reply, Reply, State};
 
 handle_call(_Request, _From, State) ->
