@@ -468,5 +468,5 @@ parse_command_packet(Packet) when is_list(Packet)->
     parse_command_packet(hex:hexstr_to_bin(Packet));
 
 parse_command_packet(Packet) when is_binary(Packet)->
-    <<_CPI:8, _CPL:8, _CHL:8, _SPI:16, _KIC:8, _KID:8, _TAR:24, _CNTR:40, _PCNTR:8, Data/binary>> = Packet,
-    Data.
+    <<_CPI:8, _CPL:8, _CHL:8, _SPI:16, _KIC:8, _KID:8, _TAR:24, CNTR:40, _PCNTR:8, Data/binary>> = Packet,
+    {cntr, CNTR, data, Data}.
