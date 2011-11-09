@@ -5,20 +5,19 @@
 -include("logger.hrl").
 -compile([export_all]).
 -compile([debug_info]).
--define(CHUNK_SIZE, 130).
+-define(SINGLE_CHUNK_SIZE, 130).
+-define(MULTIPART_CHUNK_SIZE, 124).
 
 test(CNTR, String) ->
     KicKey1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
     KicKey2 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
 
-    Y = hex:hexstr_to_bin("2F54A2B4FEBC43C0E0543E46C2B77C216D40878268C17C5A18C06E88A05F7B6F5070DC36F65553ED5E2644FA802C8B38F99B6DE822E5210DB6989942E68B4148785C86701C6582D585D493D693C405A8037DBF885258B99F2591F2E1019E7953C4FDBDAC675A01C73488FE068F9B682FEA650703133C400F45BC2397574AD6C2"),
+    Y = hex:hexstr_to_bin("B5B3AB04061B323F0BE69A5059E5C2249D2700AD1084529F0DA7EA72AB856106D425C4328E29C061D3D2275F97D3235798C15F8EBB1282A95A258D9AB07FE7D4798A9D3E23A85D2BBA3069D25EA6D16010D72C9E12552693CCA979D3AB5AB10A31AD58B6AAB7533FB7106AD980FEC58DFB0688691CEB9979861372AFABDAA87B8FCF8D020589217BA91F7249A66BDDD84F185AC9D5264B58BDF21CCDED344EBA5932C9925473FACF75F19C4FC1DD0C8BCC09E75765BF1197554E7D3EEFB6587DEBD72009AAFCF84E"),
 
-    C = des3_encrypt_data(KicKey1, KicKey2, Y),
-    D = des3_decrypt_data(KicKey1, KicKey2, C),
-
+    C = des3_decrypt_data(KicKey1, KicKey2, Y),
+    binpp:pprint(C),
     ?SYS_DEBUG("Y = ~p~n", [Y]),
     ?SYS_DEBUG("C = ~p~n", [C]),
-    ?SYS_DEBUG("D = ~p~n", [D]),
 
    create_tpud_message(CNTR, erlang:list_to_binary(String)).
 
@@ -86,15 +85,22 @@ create_tpud_message(CProf, TAR, CNTR, Data) when is_binary(Data)->
                  CProf#card_profile.kid_key2,
                  ToCC),
 
-    case size(ucp_utils:pad_to(8,Data)) =< ?CHUNK_SIZE of
+    ToCrypt = <<CNTR/binary, PCNTR:8, RC_CC_DS/binary, Data/binary>>,
+
+    SecureData = des3_encrypt_data(
+                   CProf#card_profile.kic_key1,
+                   CProf#card_profile.kic_key2,
+                   ToCrypt),
+
+    case size(SecureData) =< ?SINGLE_CHUNK_SIZE of
         true ->
-            Tpud = create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, Data),
+            Tpud = create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, SecureData),
             ?SYS_DEBUG("Returning single smspp",[]),
             Tpud;
         false ->
             ?SYS_DEBUG("Returning concatenated smspp",[]),
-            DataParts = ucp_utils:binary_split(Data,?CHUNK_SIZE),
-            Ref = binary:decode_unsigned(CNTR) rem 255,
+            DataParts = ucp_utils:binary_split(SecureData,?MULTIPART_CHUNK_SIZE),
+            Ref = binary:decode_unsigned(CNTR) rem 256,
             Seq = 0,
             Tot = length(DataParts),
             Tpuds = create_tpud_concatenated(first,
@@ -160,18 +166,12 @@ des_encrypt_data(Key, IVec, Data) ->
 des_decrypt_data(Key, IVec, Data) ->
     crypto:des_cbc_decrypt(Key, IVec, ucp_utils:pad_to(8,Data)).
 
-create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, Data) ->
+create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, SecureData) ->
     KIC = CProf#card_profile.kic,
     KID = CProf#card_profile.kic,
     <<SPIA, SPIB>> = CProf#card_profile.spi,
     ConstPart = <<SPIA:8, SPIB:8, KIC/binary, KID/binary, TAR/binary>>,
 
-    ToCrypt = <<CNTR/binary, PCNTR:8, RC_CC_DS/binary, Data/binary>>,
-
-    SecureData = des3_encrypt_data(
-                   CProf#card_profile.kic_key1,
-                   CProf#card_profile.kic_key2,
-                   ToCrypt),
     UDHL = <<16#02>>,
     IEIa = <<16#70>>,
     IEIDLa = <<16#00>>,
@@ -190,7 +190,6 @@ create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, Data) ->
     ?SYS_DEBUG("CNTR                 ~p~n",     [hex:to_hexstr(CNTR)]),
     ?SYS_DEBUG("PCNTR                ~p~n",     [hex:to_hexstr(PCNTR)]),
     ?SYS_DEBUG("RCCCDS               ~p~n",     [hex:to_hexstr(RC_CC_DS)]),
-    ?SYS_DEBUG("DATA                 ~p~n",     [hex:to_hexstr(Data)]),
     ?SYS_DEBUG("SDATA                ~p~n",     [hex:to_hexstr(SecureData)]),
     Xser = <<16#01, 16#03, UDHL/binary, IEIa/binary, IEIDLa/binary>>,
 
@@ -279,8 +278,7 @@ create_tpud_concatenated(Seq, #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, i
             XserLL = size(XserDD),
 
             TPDU = <<CPL:16, CHL:8, SPI/binary, KIC/binary, KID/binary, TAR/binary, DataPart/binary >>,
-            XserLen = size(<<XserLL:8, XserDD/binary>>),
-            Xser = <<16#01, XserLen:8, XserLL:8, XserDD/binary>>,
+            Xser = <<16#01, XserLL:8, XserDD/binary>>,
 
             ?SYS_DEBUG("Xser                 ~p~n",[hex:to_hexstr(Xser)]),
             {xser, Xser, data, TPDU};
@@ -292,8 +290,7 @@ create_tpud_concatenated(Seq, #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, i
             XserLL = size(XserDD),
 
             TPDU = <<DataPart/binary >>,
-            XserLen = size(<<XserLL:8, XserDD/binary>>),
-            Xser = <<16#01, XserLen:8, XserLL:8, XserDD/binary>>,
+            Xser = <<16#01, XserLL:8, XserDD/binary>>,
 
             ?SYS_DEBUG("Xser                 ~p~n",[hex:to_hexstr(Xser)]),
             {xser, Xser, data, TPDU}
