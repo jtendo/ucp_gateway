@@ -438,7 +438,8 @@ generate_messages({send_txt_message, {Receiver, Message}}, State) ->
     {ok, [{TRN, Msg}], State#state{trn = TRN}};
 
 generate_messages({send_bin_message, {Receiver, Message}}, State) ->
-    CNTR = State#state.cntr + 1,
+    [{cntr, CNTR}] = ets:lookup(sms, cntr),
+    ets:update_counter(sms, cntr, 2),
     Tpdus = ucp_smspp:create_tpud_message(CNTR, Message),
     create_bin_message(Receiver, Tpdus, State#state{cntr = CNTR}).
 
@@ -557,7 +558,7 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     case Body#ucp_cmd_5x.mt of
         "4" -> % STK message
             % TODO: decode OAdC
-            Data = ucp_smspp:parse_command_packet(Body#ucp_cmd_5x.msg),
+            {cntr, _, data, Data} = ucp_smspp:parse_command_packet(Body#ucp_cmd_5x.msg),
             Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
             gen_event:notify(dynx_router, {rx_msg, {Sender, Data}});
         _Else ->

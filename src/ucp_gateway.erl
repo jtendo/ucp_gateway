@@ -10,6 +10,8 @@
 %%%===================================================================
 
 start(_StartType, _StartArgs) ->
+    ets:new(sms, [public, named_table]),
+    ets:insert(sms, {cntr, 0}),
     ucp_gateway_sup:start_link().
 
 % For application start from console
