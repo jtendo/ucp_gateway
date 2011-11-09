@@ -134,7 +134,6 @@ des3_decrypt_data(Key1, Key2, Data) ->
 des3_encrypt_data(Key1, Key2, Data, IVec) ->
     crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, ucp_utils:pad_to(8,Data)).
 
-
 des_encrypt_data(Key, IVec, Data) ->
     crypto:des_cbc_encrypt(Key, IVec, ucp_utils:pad_to(8,Data)).
 
@@ -281,8 +280,7 @@ create_tpud_concatenated(Seq, #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, i
             XserDD = <<UDHL:8, IEIa/binary, IEIDLa/binary, IEIDa/binary, IEIb/binary, IEIDLb/binary>>,
 
             XserLL = size(XserDD),
-            TPDU = <<CPL:16, CHL:8, SPI/binary, KIC/binary, KID/binary, TAR/binary,
-              RC_CC_SS/binary, DataPart/binary >>,
+            TPDU = <<CPL:16, CHL:8, SPI/binary, KIC/binary, KID/binary, TAR/binary, DataPart/binary >>,
             XserLen = size(<<XserLL:8, XserDD/binary>>),
             Xser = <<16#01, XserLen:8, XserLL:8, XserDD/binary>>,
             ?SYS_DEBUG("Xser                 ~p~n",[hex:to_hexstr(Xser)]),
