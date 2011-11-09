@@ -8,8 +8,10 @@
 
 -export([
          to_ira/1,
+         from_ira/1,
          to_7bit/1,
-         calculate_sender/1,
+         encode_sender/1,
+         decode_sender/2,
          compose_message/2,
          binary_split/2,
          pad_to/2,
@@ -40,6 +42,10 @@ to_ira(Str) ->
     GsmMessage = lists:map(fun(X) -> ucp_ia5:ascii_to_gsm(X) end, Str),
     lists:flatten(GsmMessage).
 
+from_ira(Str) ->
+    ASCIMessage = lists:map(fun(X) -> ucp_ia5:gsm_to_ascii(X) end, Str),
+    lists:flatten(ASCIMessage).
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
@@ -52,23 +58,30 @@ to_ira(Str) ->
 to_7bit(Str) -> binary:bin_to_list(ucp_7bit:to_7bit(Str)).
 
 %%--------------------------------------------------------------------
-%% @private
-%% @doc
 %% Function for calculating UCP OAdC field for string and returns list
-%% of Hex octets
-%%
-%% @spec calculate_sender(String) -> {otoa, OTOA, sender, SENDER }
-%% @end
 %%--------------------------------------------------------------------
-calculate_sender(Sender) ->
+encode_sender(Sender) ->
+    % TODO: detect international numer and set OTOA: 1139
     case has_only_digits(Sender) of
         true ->
-            {otoa, "1139", sender, Sender};
+            {"", Sender};
         false ->
-            {otoa, "5039", sender, append_length(
-                                      hex:to_hexstr(
-                                        to_7bit(
-                                          to_ira(Sender))))}
+            {"5039", append_length(
+                        hex:to_hexstr(
+                           to_7bit(
+                              to_ira(Sender))))}
+    end.
+
+decode_sender(OTOA, OAdC) ->
+    case OTOA of
+        "5039" ->
+           % Cut off sender length
+           from_ira(
+              ucp_7bit:from_7bit(
+                 hex:hexstr_to_list(
+                    string:substr(OAdC, 3))));
+        _Other ->
+           OAdC
     end.
 
 %%--------------------------------------------------------------------
