@@ -1,14 +1,20 @@
 -module(ucp_conn_pool).
+-author('andrzej.trawinski@jtendo.com').
+-author('adam.rutkowski@jtendo.com').
 
 -behaviour(gen_server).
 
 -include("logger.hrl").
+-include("ucp_gateway.hrl").
 
 %% API
 -export([start_link/0,
-         get_members/0,
          join_pool/1,
-         health_check/0]).
+         get_active_connection/0,
+         get_connection/0]).
+
+%% transitions
+-export([handle_transition/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -19,7 +25,6 @@
          code_change/3]).
 
 -define(SERVER, ?MODULE).
--define(POOL_NAME, ucp_conn_pool).
 
 -record(state, {endpoints}).
 
@@ -35,21 +40,37 @@
 start_link() ->
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-health_check() ->
-    gen_server:call(?SERVER, health_check).
-
-get_members() ->
-    gen_server:call(?SERVER, get_members).
+-spec join_pool(Pid :: pid()) -> 'ok'.
 
 join_pool(Pid) when is_pid(Pid) ->
     gen_server:cast(?SERVER, {join_pool, Pid}).
+
+-spec get_active_connection() ->  pid() | {'error', Reason} when
+    Reason ::  {'no_process', Name} | {'no_such_group', Name}.
+
+get_active_connection() ->
+    gen_server:call(?SERVER, get_active_connection).
+
+-spec get_connection() ->  pid() | {'error', Reason} when
+    Reason ::  {'no_process', Name} | {'no_such_group', Name}.
+
+get_connection() ->
+    gen_server:call(?SERVER, get_any_connection).
+
+%%%===================================================================
+%%% connection process transition callback
+%%%===================================================================
+
+handle_transition(Pid, Transition) ->
+    gen_server:cast(?SERVER, {connection_transition, {Pid, Transition}}).
 
 %%%===================================================================
 %%% gen_server callbacks
 %%%===================================================================
 
 init([]) ->
-    pg2:create(?POOL_NAME),
+    pg2:create(?CONNECTIONS),
+    pg2:create(?CONNECTIONS_ACTIVE),
     confetti:use(ucp_pool_conf, [
             {location, {"ucp_pool_conf.conf", "conf"}},
             {validators, [fun ensure_valid_syntax/1,
@@ -58,8 +79,12 @@ init([]) ->
     Conns = confetti:fetch(ucp_pool_conf),
     {ok, #state{endpoints = Conns}, 0}.
 
-handle_call(get_members, _From, State) ->
-    Reply = get_members_internal(),
+handle_call(get_active_connection, _From, State) ->
+    Reply = pg2:get_closest_pid(?CONNECTIONS_ACTIVE),
+    {reply, Reply, State};
+
+handle_call(get_any_connection, _From, State) ->
+    Reply = pg2:get_closest_pid(?CONNECTIONS),
     {reply, Reply, State};
 
 handle_call(_Request, _From, State) ->
@@ -67,11 +92,15 @@ handle_call(_Request, _From, State) ->
     {reply, Reply, State}.
 
 handle_cast({join_pool, Pid}, State) ->
-    case lists:member(Pid, get_members_internal()) of
-        true -> ok;
-        false ->
-            pg2:join(?POOL_NAME, Pid)
-    end,
+    smart_join(?CONNECTIONS, Pid),
+    {noreply, State};
+
+handle_cast({connection_transition, {Pid, active}}, State) ->
+    smart_join(?CONNECTIONS_ACTIVE, Pid),
+    {noreply, State};
+
+handle_cast({connection_transition, {Pid, _Transition}}, State) ->
+    leave(?CONNECTIONS_ACTIVE, Pid),
     {noreply, State};
 
 handle_cast(_Msg, State) ->
@@ -109,11 +138,25 @@ connect_smsc({Name, {Host, Port, Login, Password, up}}) ->
    ok;
 
 connect_smsc({Name, {_Host, _Port, _Login, _Password, State}}) ->
-   ?SYS_DEBUG("Connection ~p excluded from starting, due to its status: ~p", [Name, State]),
+   %% should never happen, warn about this
+   ?SYS_WARN("Connection ~p excluded from starting, due to its status: ~p", [Name, State]),
    ok.
 
+get_members_internal(Pool) ->
+    pg2:get_local_members(Pool).
+
 get_members_internal() ->
-    pg2:get_local_members(?POOL_NAME).
+    get_members_internal(?CONNECTIONS).
+
+smart_join(Group, Pid) ->
+    case lists:member(Pid, get_members_internal(Group)) of
+        true -> ok;
+        false ->
+            pg2:join(Group, Pid)
+    end.
+
+leave(Group, Pid) ->
+    pg2:leave(Group, Pid).
 
 %%%===================================================================
 %%% Configuration reload handlers
@@ -140,7 +183,10 @@ is_conn_alive(Name, ConnsAlive) ->
 find_convicts(ConnsAlive, []) -> ConnsAlive;
 find_convicts(ConnsAlive, Conf) ->
     lists:filter(fun({Name, _}) ->
-                {_,_,_,_,Status} = proplists:get_value(Name, Conf),
+                case proplists:get_value(Name, Conf) of
+                    {_,_,_,_,Status} -> ok;
+                    undefined -> Status = undefined
+                end,
                 %% find oprhans
                 not lists:member(Name, proplists:get_keys(Conf))
                 %% find explicit shutdowns

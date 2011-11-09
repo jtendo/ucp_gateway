@@ -66,7 +66,7 @@ calculate_sender(Sender) ->
             {otoa, "1139", sender, Sender};
         false ->
             {otoa, "5039", sender, append_length(
-                                      hex:list_to_hexstr(
+                                      hex:to_hexstr(
                                         to_7bit(
                                           to_ira(Sender))))}
     end.
@@ -95,7 +95,7 @@ append_length(L) ->
     {ElemsWithZero, ElemsWithOutZero} = lists:partition(Fun, L),
     Len = length(ElemsWithOutZero)*2
         + length(ElemsWithZero),
-    HexStr = hex:int_to_hexstr(Len),
+    HexStr = hex:to_hexstr(Len),
     lists:flatten([HexStr, L]).
 
 %%--------------------------------------------------------------------

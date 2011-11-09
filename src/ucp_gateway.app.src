@@ -24,7 +24,8 @@
           ucp_7bit,
           ucp_ia5,
           ucp_messages,
-          ucp_utils
+          ucp_utils,
+          gen_fsm2
          ]},
    {mod, { ucp_gateway, []}},
    {env, []}

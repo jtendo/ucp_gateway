@@ -75,7 +75,7 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message, Xser) when is_binary(Messag
 create_cmd_51_unicode(Trn, Sender, Receiver, Message) ->
     {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
 
-    HexStr = hex:list_to_hexstr(unicode:characters_to_list(Message)),
+    HexStr = hex:to_hexstr(unicode:characters_to_list(Message)),
 
     HexMessage = lists:flatten(
                    [string:right(X, 4, $0) || X <- HexStr]),
@@ -101,7 +101,7 @@ create_cmd_51_unicode(Trn, Sender, Receiver, Message) ->
 %%--------------------------------------------------------------------
 create_cmd_51_normal(Trn, Sender, Receiver, Message) ->
 
-    UCPMsg = lists:flatten(hex:list_to_hexstr(ucp_utils:to_ira(Message))),
+    UCPMsg = lists:flatten(hex:to_hexstr(ucp_utils:to_ira(Message))),
     {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
 
     Body = #ucp_cmd_5x{
@@ -120,7 +120,7 @@ create_cmd_51_normal(Trn, Sender, Receiver, Message) ->
 %% Function try to create UCP 60 Message Login
 %%--------------------------------------------------------------------
 create_cmd_60(Trn, Login,  Password) ->
-    IRAPassword = lists:flatten(hex:list_to_hexstr(ucp_utils:to_ira(Password))),
+    IRAPassword = lists:flatten(hex:to_hexstr(ucp_utils:to_ira(Password))),
     Body = #ucp_cmd_60{
               oadc = Login,
               oton = "6",
