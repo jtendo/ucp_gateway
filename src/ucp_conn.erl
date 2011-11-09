@@ -450,7 +450,7 @@ create_bin_message(Receiver, Bins, State) ->
 create_bin_message(_Receiver, [], State, Result) ->
     {ok, lists:reverse(Result), State};
 
-create_bin_message(Receiver, [{Xser,Bin}|Tail], State, Result) ->
+create_bin_message(Receiver, [{xser, Xser, data, Bin}|Tail], State, Result) ->
     TRN = ucp_utils:get_next_trn(State#state.trn),
     {ok, Msg} = ucp_messages:create_cmd_51_binary(TRN, State#state.default_originator,
             Receiver, Bin, Xser),
