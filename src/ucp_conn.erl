@@ -548,24 +548,36 @@ process_message({#ucp_header{ot = "51", o_r = "R", trn = TRN}, Body}, State) ->
 process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     % respond with ACK
     ?SYS_INFO("Received message: ~p", [Body]),
-    {ok, Message} = ucp_messages:create_ack(Header),
-    ?SYS_INFO("Sending ACK message: ~p", [Message]),
-    gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)),
+    {ok, Ack} = ucp_messages:create_ack(Header),
+    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
+    gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
     %TODO: Check sending result = Don't know what to do when error!!
     % Handle message
     case Body#ucp_cmd_5x.mt of
         "4" -> % STK message
             % TODO: decode OAdC
-            %Data = ucp_smspp:decrypt(Body#ucp_cmd_5x.msg),
-            %gen_event:notify(dynx_router, {rx_msg, {Body#ucp_cmd_5x.oadc, Data}});
-            ok;
+            Data = ucp_smspp:parse_command_packet(Body#ucp_cmd_5x.msg),
+            Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
+            gen_event:notify(dynx_router, {rx_msg, {Sender, Data}});
         _Else ->
             ignore
     end,
     {ok, State};
 
-process_message(Message, State) ->
+process_message({Header = #ucp_header{ot = "53", o_r = "O"}, Body}, State) ->
+    % respond with ACK
+    Info = hex:hexstr_to_list(ucp_utils:from_ira(Body#ucp_cmd_5x.msg)),
+    ?SYS_INFO("Received delivery report message: ~p", [Info]),
+    {ok, Ack} = ucp_messages:create_ack(Header),
+    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
+    gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
+    {ok, State};
+
+process_message(Message = {Header, _Body}, State) ->
     ?SYS_DEBUG("Unhandled message: ~p", [Message]),
+    {ok, Ack} = ucp_messages:create_ack(Header),
+    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
+    gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
     {ok, State}.
 
 check_result(Result) when is_record(Result, ack) ->

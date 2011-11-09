@@ -47,12 +47,13 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message, Xser) when is_binary(Messag
     lager:debug("Binary msg content: ~p", [L]),
     {ok, HexXser} = binpp:convert(Xser),
     UCPMsg = lists:flatten(hex:to_hexstr(Message)),
-    {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
+    {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
 
     Body = #ucp_cmd_5x{
               oadc = UCPSender,
               adc = Receiver,
               otoa = OTOA,
+              nrq = "1",
               rpid = "0127",
               mcls = "2", %% class message 2
               xser = lists:flatten(HexXser),
@@ -73,7 +74,7 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message, Xser) when is_binary(Messag
 %% Function try to create UCP 51 Message having utf-8 chars
 %%--------------------------------------------------------------------
 create_cmd_51_unicode(Trn, Sender, Receiver, Message) ->
-    {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
+    {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
 
     HexStr = hex:to_hexstr(unicode:characters_to_list(Message)),
 
@@ -86,6 +87,7 @@ create_cmd_51_unicode(Trn, Sender, Receiver, Message) ->
               oadc = UCPSender,
               adc = Receiver,
               otoa = OTOA,
+              nrq = "1",
               mt = "4",
               nb = NB,
               xser = XSER,
@@ -102,12 +104,13 @@ create_cmd_51_unicode(Trn, Sender, Receiver, Message) ->
 create_cmd_51_normal(Trn, Sender, Receiver, Message) ->
 
     UCPMsg = lists:flatten(hex:to_hexstr(ucp_utils:to_ira(Message))),
-    {otoa, OTOA, sender, UCPSender} = ucp_utils:calculate_sender(Sender),
+    {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
 
     Body = #ucp_cmd_5x{
               oadc = UCPSender,
               adc = Receiver,
               otoa = OTOA,
+              nrq = "1",
               mt = "3",
               msg = UCPMsg},
     Header = #ucp_header{
