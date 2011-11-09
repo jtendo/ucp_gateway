@@ -554,15 +554,10 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
     %TODO: Check sending result = Don't know what to do when error!!
     % Handle message
-    case Body#ucp_cmd_5x.mt of
-        "4" -> % STK message
-            % TODO: decode OAdC
-            Data = ucp_smspp:parse_command_packet(Body#ucp_cmd_5x.msg),
-            Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
-            gen_event:notify(dynx_router, {rx_msg, {Sender, Data}});
-        _Else ->
-            ignore
-    end,
+    Recipient = Body#ucp_cmd_5x.adc,
+    Data = Body#ucp_cmd_5x.msg,
+    Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
+    gen_event:notify(ucp_event, {ucp_5x, {Recipient, Sender, Data}}),
     {ok, State};
 
 process_message({Header = #ucp_header{ot = "53", o_r = "O"}, Body}, State) ->

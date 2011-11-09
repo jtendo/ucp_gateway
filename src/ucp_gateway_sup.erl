@@ -27,6 +27,7 @@ start_link() ->
 init([]) ->
     Children = [
         ?CHILD(ucp_conn_sup, supervisor),
-        ?CHILD(ucp_conn_pool, worker)
+        ?CHILD(ucp_conn_pool, worker),
+        ?CHILD(ucp_event, worker)
     ],
     {ok, { {one_for_one, 5, 10}, Children} }.
