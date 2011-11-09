@@ -11,7 +11,8 @@ test(CNTR, String) ->
     KicKey1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
     KicKey2 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
 
-    Y = binpp:from_str("03 10 00 60 02 00 1A 4D 3A 20 35 30 31 30 30 30 30 30 30 20 4F 3A 20 4F 72 61 6E 67 65 20 4F 6E 65 03 00 0C 04 00 4E 6F 77 79 20 6E 75 6D 65 72 03 00 0E 05 00 5A 6D 69 65 6E 20 6F 66 65 72 74 65 00 00 20 F6 00 00 1C FF 00 02 01 61"),
+    Y = hex:hexstr_to_bin("2F54A2B4FEBC43C0E0543E46C2B77C216D40878268C17C5A18C06E88A05F7B6F5070DC36F65553ED5E2644FA802C8B38F99B6DE822E5210DB6989942E68B4148785C86701C6582D585D493D693C405A8037DBF885258B99F2591F2E1019E7953C4FDBDAC675A01C73488FE068F9B682FEA650703133C400F45BC2397574AD6C2"),
+
     C = des3_encrypt_data(KicKey1, KicKey2, Y),
     D = des3_decrypt_data(KicKey1, KicKey2, C),
 
@@ -193,7 +194,7 @@ create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, Data) ->
     ?SYS_DEBUG("SDATA                ~p~n",     [hex:to_hexstr(SecureData)]),
     Xser = <<16#01, 16#03, UDHL/binary, IEIa/binary, IEIDLa/binary>>,
 
-    [{xser, Xser, data, SecureData}].
+    [{xser, Xser, data, << CPL:16, CHL:8, ConstPart/binary, SecureData/binary >>}].
 
 
 size_PCNTR(0) ->
