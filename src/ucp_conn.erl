@@ -85,8 +85,7 @@
 %%%===================================================================
 
 start_link({Name, {Host, Port, Login, Password}}) ->
-    gen_fsm2:start_link(?MODULE, [Name, {Host, Port, Login, Password}],
-        [{debug, [trace, log]}]).
+    gen_fsm2:start_link(?MODULE, [Name, {Host, Port, Login, Password}], []). %[{debug, [trace, log]}]
 
 %%% --------------------------------------------------------------------
 %%% Get status of connection.
