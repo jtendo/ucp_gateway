@@ -5,8 +5,9 @@
 -include("ucp_syntax.hrl").
 
 -export([
-        check_options/2,
          create_cmd_51_text/4,
+         create_cmd_51_text/5,
+         create_cmd_51_binary/4,
          create_cmd_51_binary/5,
          create_cmd_60/3,
          create_cmd_31/2,
@@ -32,16 +33,22 @@
 %% Create UCP 51 message
 %%--------------------------------------------------------------------
 create_cmd_51_text(Trn, Sender, Receiver, Message) when is_list(Message)->
+    create_cmd_51_text(Trn, Sender, Receiver, Message, []).
+
+create_cmd_51_text(Trn, Sender, Receiver, Message, Options) when is_list(Message)->
     case analyze_message(Message) of
         {'7bit', true} ->
-            create_cmd_51_normal(Trn, Sender, Receiver, Message);
+            create_cmd_51_normal(Trn, Sender, Receiver, Message, Options);
         {'7bit', false} ->
-            create_cmd_51_unicode(Trn, Sender, Receiver, Message)
+            create_cmd_51_unicode(Trn, Sender, Receiver, Message, Options)
     end.
 
 %%--------------------------------------------------------------------
 %% Function try to create UCP 51 Message not having utf-8 chars
 %%--------------------------------------------------------------------
+create_cmd_51_binary(Trn, Sender, Receiver, Message) when is_binary(Message) ->
+    create_cmd_51_binary(Trn, Sender, Receiver, Message, []).
+
 create_cmd_51_binary(Trn, Sender, Receiver, Message, Options) when is_binary(Message) ->
 
     {ok, L} = binpp:convert(Message),
@@ -59,12 +66,16 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message, Options) when is_binary(Mes
               mt = "4",
               nb = integer_to_list(length(UCPMsg)*4),
               msg = UCPMsg},
-    Body = check_options(TempBody, Options),
     Header = #ucp_header{
               trn = ucp_utils:trn_to_str(Trn),
               o_r = "O",
               ot = "51"},
-    {ok, ucp_utils:compose_message(Header, Body)}.
+    case check_cmd_5x_bin_options(TempBody, Options) of
+        {ok, Body} ->
+            {ok, ucp_utils:compose_message(Header, Body)};
+        Error ->
+            Error
+    end.
 
 %% ---------------------------------------------------------------------
 %% Internals
@@ -73,7 +84,7 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message, Options) when is_binary(Mes
 %%--------------------------------------------------------------------
 %% Function try to create UCP 51 Message having utf-8 chars
 %%--------------------------------------------------------------------
-create_cmd_51_unicode(Trn, Sender, Receiver, Message) ->
+create_cmd_51_unicode(Trn, Sender, Receiver, Message, Options) ->
     % Check max sender len. 16
     {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
 
@@ -84,11 +95,10 @@ create_cmd_51_unicode(Trn, Sender, Receiver, Message) ->
 
     XSER = "020108",
     NB = integer_to_list(length(HexMessage)*4),
-    Body = #ucp_cmd_5x{
+    TempBody = #ucp_cmd_5x{
               oadc = UCPSender,
               adc = Receiver,
               otoa = OTOA,
-              nrq = "1",
               mt = "4",
               nb = NB,
               xser = XSER,
@@ -97,51 +107,70 @@ create_cmd_51_unicode(Trn, Sender, Receiver, Message) ->
               trn = ucp_utils:trn_to_str(Trn),
               o_r = "O",
               ot = "51"},
-    {ok, ucp_utils:compose_message(Header, Body)}.
+    case check_cmd_5x_options(TempBody, Options) of
+        {ok, Body} ->
+            {ok, ucp_utils:compose_message(Header, Body)};
+        Error ->
+            Error
+    end.
 
 %%--------------------------------------------------------------------
 %% Function try to create UCP 51 Message not having utf-8 chars
 %%--------------------------------------------------------------------
-create_cmd_51_normal(Trn, Sender, Receiver, Message) ->
+create_cmd_51_normal(Trn, Sender, Receiver, Message, Options) ->
 
     UCPMsg = lists:flatten(hex:to_hexstr(ucp_utils:to_ira(Message))),
     {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
 
-    Body = #ucp_cmd_5x{
+    TempBody = #ucp_cmd_5x{
               oadc = UCPSender,
               adc = Receiver,
               otoa = OTOA,
-              nrq = "1",
               mt = "3",
               msg = UCPMsg},
     Header = #ucp_header{
               trn = ucp_utils:trn_to_str(Trn),
               o_r = "O",
               ot = "51"},
-    {ok, ucp_utils:compose_message(Header, Body)}.
+    case check_cmd_5x_options(TempBody, Options) of
+        {ok, Body} ->
+            {ok, ucp_utils:compose_message(Header, Body)};
+        Error ->
+            Error
+    end.
 
 %%--------------------------------------------------------------------
 %% Function checks ucp_cmd_5x options
 %%--------------------------------------------------------------------
-check_options(Rec, []) ->
-    Rec;
-check_options(Rec, [{notification_request, Bool}|T])
-  when Bool == true ->
-    check_options(Rec#ucp_cmd_5x{nrq = "1"}, T);
-check_options(Rec, [{extra_services, Value}|T])
-  when is_list(Value) ->
-    {ok, HexXser} = binpp:convert(Value),
-    check_options(Rec#ucp_cmd_5x{xser = lists:flatten(HexXser)}, T);
-check_options(Rec, [{validity_period, Value}|T]) % DDMMYYHHmm
-  when is_list(Value); length(Value) =:= 10 ->
-    check_options(Rec#ucp_cmd_5x{vp = Value}, T);
-check_options(Rec, [{deferred_delivery_time, Value}|T]) % DDMMYYHHmm
-  when is_list(Value); length(Value) =:= 10 ->
-    check_options(Rec#ucp_cmd_5x{dd = "1", ddt = Value}, T);
-check_options(Rec, [_H|T]) ->
-    % Option unknown or incorrect value: ~w", [H]).
-    check_options(Rec, T).
 
+% 5x binary message specific options handling
+check_cmd_5x_bin_options(Rec, Opts) ->
+    check_cmd_5x_bin_options(Rec, Opts, Opts).
+
+check_cmd_5x_bin_options(Rec, [], Opts) ->
+   check_cmd_5x_options(Rec, Opts);
+check_cmd_5x_bin_options(Rec, [{extra_services, Value}|T], Opts)
+   when is_list(Value) ->
+      check_cmd_5x_bin_options(Rec#ucp_cmd_5x{xser = Value}, T, Opts);
+check_cmd_5x_bin_options(Rec, [_H|T], Opts) ->
+   % Option unknown or incorrect value: ~w", [H]).
+   check_cmd_5x_bin_options(Rec, T, Opts).
+
+% 5x messages common options handling
+check_cmd_5x_options(Rec, []) ->
+    {ok, Rec};
+check_cmd_5x_options(Rec, [{notification_request, Bool}|T])
+  when Bool == true ->
+    check_cmd_5x_options(Rec#ucp_cmd_5x{nrq = "1"}, T);
+check_cmd_5x_options(Rec, [{validity_period, Value}|T]) % DDMMYYHHmm
+  when is_list(Value); length(Value) =:= 10 ->
+    check_cmd_5x_options(Rec#ucp_cmd_5x{vp = Value}, T);
+check_cmd_5x_options(Rec, [{deferred_delivery_time, Value}|T]) % DDMMYYHHmm
+  when is_list(Value); length(Value) =:= 10 ->
+    check_cmd_5x_options(Rec#ucp_cmd_5x{dd = "1", ddt = Value}, T);
+check_cmd_5x_options(Rec, [_H|T]) ->
+    % Option unknown or incorrect value: ~w", [H]).
+    check_cmd_5x_options(Rec, T).
 
 %%--------------------------------------------------------------------
 %% Function try to create UCP 60 Message Login
