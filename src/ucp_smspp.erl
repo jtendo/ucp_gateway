@@ -77,8 +77,8 @@ create_tpud_message(CProf, TAR, CNTR, Data) when is_binary(Data)->
     CHL = size(ConstPart) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
     CPL = size(ConstPart) + SizeOfDataToCrypt + PCNTR + 1 , %%  1 goes for CHL TODO, check if CHi is needed, 03.48 Table 7 Null Field?!?
 
-    ToCC_nopadding = <<CPL:16, CHL:8, ConstPart/binary, CNTR/binary, PCNTR:8, Data/binary>>,
-    ToCC = ucp_utils:pad_to(8,ToCC_nopadding),
+    ToCC_nopadding = <<CPL:16, CHL:8, ConstPart/binary, CNTR/binary, PCNTR:8, Data/binary, 0:(PCNTR*8)>>,
+    ToCC = ucp_utils:pad_to(8, ToCC_nopadding),
 
     RC_CC_DS = calculate_cc(
                  CProf#card_profile.kid_key1,
@@ -134,12 +134,9 @@ calculate_cc(Key1, Key2, Data) ->
     calculate_cc(Key1, Key2, Res, NextBlock, RestBlocks).
 
 calculate_cc(Key1, Key2, LastBlock, Block, []) ->
-    IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
     Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, LastBlock, Block),
-    Mac = crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, Res),
-    ?SYS_DEBUG("RES                  ~p~n",[hex:to_hexstr(IVec)]),
-    ?SYS_DEBUG("CC                  ~p~n",[hex:to_hexstr(Mac)]),
-    Mac;
+    ?SYS_DEBUG("res                  ~p~n",[hex:to_hexstr(Res)]),
+    Res;
 
 calculate_cc(Key1, Key2, LastBlock, Block, Rest) ->
     Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, LastBlock, Block),
