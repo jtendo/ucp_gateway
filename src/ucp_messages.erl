@@ -5,6 +5,7 @@
 -include("ucp_syntax.hrl").
 
 -export([
+        check_options/2,
          create_cmd_51_text/4,
          create_cmd_51_binary/5,
          create_cmd_60/3,
@@ -41,25 +42,24 @@ create_cmd_51_text(Trn, Sender, Receiver, Message) when is_list(Message)->
 %%--------------------------------------------------------------------
 %% Function try to create UCP 51 Message not having utf-8 chars
 %%--------------------------------------------------------------------
-create_cmd_51_binary(Trn, Sender, Receiver, Message, Xser) when is_binary(Message) ->
+create_cmd_51_binary(Trn, Sender, Receiver, Message, Options) when is_binary(Message) ->
 
     {ok, L} = binpp:convert(Message),
     lager:debug("Binary msg content: ~p", [L]),
-    {ok, HexXser} = binpp:convert(Xser),
     UCPMsg = lists:flatten(hex:to_hexstr(Message)),
+    % Check max sender len. 16
     {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
 
-    Body = #ucp_cmd_5x{
+    TempBody = #ucp_cmd_5x{
               oadc = UCPSender,
               adc = Receiver,
               otoa = OTOA,
-              nrq = "1",
               rpid = "0127",
               mcls = "2", %% class message 2
-              xser = lists:flatten(HexXser),
               mt = "4",
               nb = integer_to_list(length(UCPMsg)*4),
               msg = UCPMsg},
+    Body = check_options(TempBody, Options),
     Header = #ucp_header{
               trn = ucp_utils:trn_to_str(Trn),
               o_r = "O",
@@ -74,6 +74,7 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message, Xser) when is_binary(Messag
 %% Function try to create UCP 51 Message having utf-8 chars
 %%--------------------------------------------------------------------
 create_cmd_51_unicode(Trn, Sender, Receiver, Message) ->
+    % Check max sender len. 16
     {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
 
     HexStr = hex:to_hexstr(unicode:characters_to_list(Message)),
@@ -118,6 +119,29 @@ create_cmd_51_normal(Trn, Sender, Receiver, Message) ->
               o_r = "O",
               ot = "51"},
     {ok, ucp_utils:compose_message(Header, Body)}.
+
+%%--------------------------------------------------------------------
+%% Function checks ucp_cmd_5x options
+%%--------------------------------------------------------------------
+check_options(Rec, []) ->
+    Rec;
+check_options(Rec, [{notification_request, Bool}|T])
+  when Bool == true ->
+    check_options(Rec#ucp_cmd_5x{nrq = "1"}, T);
+check_options(Rec, [{extra_services, Value}|T])
+  when is_list(Value) ->
+    {ok, HexXser} = binpp:convert(Value),
+    check_options(Rec#ucp_cmd_5x{xser = lists:flatten(HexXser)}, T);
+check_options(Rec, [{validity_period, Value}|T]) % DDMMYYHHmm
+  when is_list(Value); length(Value) =:= 10 ->
+    check_options(Rec#ucp_cmd_5x{vp = Value}, T);
+check_options(Rec, [{deferred_delivery_time, Value}|T]) % DDMMYYHHmm
+  when is_list(Value); length(Value) =:= 10 ->
+    check_options(Rec#ucp_cmd_5x{dd = "1", ddt = Value}, T);
+check_options(Rec, [_H|T]) ->
+    % Option unknown or incorrect value: ~w", [H]).
+    check_options(Rec, T).
+
 
 %%--------------------------------------------------------------------
 %% Function try to create UCP 60 Message Login
@@ -179,4 +203,5 @@ partition_by([], _Num, Acc)->
 analyze_message(Message) ->
     Bit = unicode:bin_is_7bit(unicode:characters_to_binary(Message)),
     {'7bit', Bit}.
+
 
