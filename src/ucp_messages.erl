@@ -12,7 +12,6 @@
          create_cmd_60/3,
          create_cmd_31/2,
          create_ack/1,
-         partition_by/2,
          analyze_message/1]).
 
 -compile([debug_info]).
@@ -207,24 +206,6 @@ create_cmd_31(Trn, Address) ->
 
 create_ack(Header) when is_record(Header, ucp_header) ->
     {ok, ucp_utils:compose_message(Header#ucp_header{o_r = "R"}, #ack{})}.
-
-
-%%--------------------------------------------------------------------
-%% Function splits list into list of lists each Num long
-%%--------------------------------------------------------------------
-partition_by(L, Num)->
-    partition_by(L,Num,[]).
-
-partition_by(L, Num, Acc) when length(L) =< Num ->
-    lists:reverse([L|Acc]);
-
-partition_by(L, Num, Acc) when length(L) > Num ->
-    {H, T} = lists:split(Num, L),
-    partition_by(T,Num,[H|Acc]);
-
-partition_by([], _Num, Acc)->
-    lists:reverse(Acc).
-
 
 %%--------------------------------------------------------------------
 %% Function checks if String contains utf8 chars
