@@ -75,7 +75,7 @@ create_tpud_message(CProf, TAR, CNTR, Data) when is_binary(Data)->
     PCNTR = (8-(SizeOfDataToCrypt rem 8)),
 
     CHL = size(ConstPart) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
-    CPL = size(ConstPart) + SizeOfDataToCrypt + PCNTR + 1,
+    CPL = size(ConstPart) + SizeOfDataToCrypt + PCNTR + 1 , %%  1 goes for CHL TODO, check if CHi is needed, 03.48 Table 7 Null Field?!?
 
     ToCC_nopadding = <<CPL:16, CHL:8, ConstPart/binary, CNTR/binary, PCNTR:8, Data/binary>>,
     ToCC = ucp_utils:pad_to(8,ToCC_nopadding),
