@@ -439,7 +439,7 @@ generate_messages({send_txt_message, {Receiver, Message}}, State) ->
 generate_messages({send_bin_message, {Receiver, Message}}, State) ->
     [{cntr, CNTR}] = ets:lookup(sms, cntr),
     ets:update_counter(sms, cntr, 2),
-    Tpdus = ucp_smspp:create_tpud_message(CNTR, Message),
+    Tpdus = ucp_smspp:create_tpud_message_no_crypt(CNTR, Message),
     create_bin_message(Receiver, Tpdus, State#state{cntr = CNTR}).
 
 % Process binary parts

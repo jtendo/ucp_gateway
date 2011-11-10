@@ -19,8 +19,44 @@ test(CNTR, String) ->
     ?SYS_DEBUG("Y = ~p~n", [Y]),
     ?SYS_DEBUG("C = ~p~n", [C]),
 
-   create_tpud_message(CNTR, erlang:list_to_binary(String)).
+    create_tpud_message(CNTR, erlang:list_to_binary(String)).
 
+
+create_tpud_message_no_crypt(CNTR, Data) when is_binary(Data)->
+    TAR = <<16#63, 16#41, 16#45>>, %% Toolkit Application Reference (TAR): 3 octets.
+    SPIA =
+        ?SPI_NO_RC_CC_DS bor
+        ?SPI_NO_ENCRYPTION bor
+        ?SPI_COUNTER_PROCESS_IF_HIGHER_THEN_RE,
+    SPIB =
+        ?SPI_POR_TO_SE bor
+        ?SPI_POR_NO_RC_CC_DS bor
+        ?SPI_POR_NOT_ENCRYPTED bor
+        ?SPI_POR_SMS_DELIVER_REPORT,
+
+    SPI = <<SPIA:8, SPIB:8>>,
+
+    KIC = ?KIC_ALGORITHM_DES bor ?KIC_ALGORITHM_3DES2 bor 2#0010000,
+    KID = ?KID_ALGORITHM_DES bor ?KID_ALGORITHM_3DES2 bor 2#0010000,
+    KicKey1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
+    KicKey2 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
+
+    KidKey1 = <<16#22, 16#22, 16#22, 16#22, 16#22, 16#22, 16#22, 16#22>>,
+    KidKey2 = <<16#22, 16#22, 16#22, 16#22, 16#22, 16#22, 16#22, 16#22>>,
+
+    CardProfile = #card_profile{
+      spi=SPI,
+      kic= <<KIC>>,
+      kid= <<KID>>,
+      kic_key1=KicKey1,
+      kic_key2=KicKey2,
+      kid_key1=KidKey1,
+      kid_key2=KidKey2
+     },
+
+    TPUDS = lists:reverse(create_tpud_message(CardProfile, TAR, <<CNTR:40>>, Data)),
+    ?SYS_DEBUG("TPUDS                  ~p~n",[TPUDS]),
+    TPUDS.
 
 create_tpud_message(CNTR, Data) when is_binary(Data)->
     TAR = <<16#63, 16#41, 16#45>>, %% Toolkit Application Reference (TAR): 3 octets.
@@ -57,11 +93,11 @@ create_tpud_message(CNTR, Data) when is_binary(Data)->
     TPUDS = lists:reverse(create_tpud_message(CardProfile, TAR, <<CNTR:40>>, Data)),
     ?SYS_DEBUG("TPUDS                  ~p~n",[TPUDS]),
     TPUDS.
-    %% lists:map(fun(Tpud) ->
-    %%                   ?SYS_DEBUG("TPUD = ~p~n", [hex:to_hexstr(Tpud)]),
-    %%                   C = create_whole_command(Tpud),
-    %%                   ?SYS_DEBUG("COMMAND = ~p~n", [lists:flatten(hex:to_hexstr(C))])
-    %%           end, TPUDS).
+%% lists:map(fun(Tpud) ->
+%%                   ?SYS_DEBUG("TPUD = ~p~n", [hex:to_hexstr(Tpud)]),
+%%                   C = create_whole_command(Tpud),
+%%                   ?SYS_DEBUG("COMMAND = ~p~n", [lists:flatten(hex:to_hexstr(C))])
+%%           end, TPUDS).
 
 
 create_tpud_message(CProf, TAR, CNTR, Data) when is_binary(Data)->
@@ -71,35 +107,56 @@ create_tpud_message(CProf, TAR, CNTR, Data) when is_binary(Data)->
 
     <<SPIA, SPIB>> = CProf#card_profile.spi,
     ConstPart = <<SPIA:8, SPIB:8, KIC/binary, KID/binary, TAR/binary>>,
-    SizeOfDataToCrypt = size(Data) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
-    PCNTR = (8-(SizeOfDataToCrypt rem 8)),
+    ?SYS_DEBUG("SPIA ~p~n", [SPIA]),
+    case SPIA band ?SPI_ENCRYPTION of
+        0->
+            %% NO CC AND NO CRYPT
+            ?SYS_DEBUG("NO CC AND NO CRYPT~n", []),
+            ?SYS_DEBUG("size CNTR ~p~n", [size_CNTR(SPIA)]),
+            ?SYS_DEBUG("size PCNTR ~p~n", [size_PCNTR(SPIA)]),
+            ?SYS_DEBUG("size RCCCDS ~p~n", [size_RC_CC_DS(SPIA)]),
+            ?SYS_DEBUG("size SPI+KIC+KID+TAR ~p~n", [size(ConstPart)]),
+            ?SYS_DEBUG("size DATA ~p~n", [size(Data)]),
 
-    CHL = size(ConstPart) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
-    CPL = size(ConstPart) + SizeOfDataToCrypt + PCNTR + 1 , %%  1 goes for CHL TODO, check if CHi is needed, 03.48 Table 7 Null Field?!?
+            PCNTR = 0,
+            CHL = size(ConstPart) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
+            CPL = size(ConstPart) + size(Data) + size(CNTR) + 1 + 1 , %%  1 goes for CHL and one for PCNTR
+            RC_CC_DS = <<>>,
+            DataToSend = <<CNTR/binary, PCNTR:8, Data/binary>>;
+        4 ->
+            %% HARDCODED 3DES AND CC
+            ?SYS_DEBUG("HARDCODED 3DES AND CC~n", []),
+            SizeOfDataToCrypt = size(Data) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
+            PCNTR = (8-(SizeOfDataToCrypt rem 8)),
 
-    ToCC_nopadding = <<CPL:16, CHL:8, ConstPart/binary, CNTR/binary, PCNTR:8, Data/binary>>,
-    ToCC = ucp_utils:pad_to(8,ToCC_nopadding),
+            CHL = size(ConstPart) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
+            CPL = size(ConstPart) + SizeOfDataToCrypt + PCNTR + 1 , %%  1 goes for CHL TODO, check if CHi is needed, 03.48 Table 7 Null Field?!?
 
-    RC_CC_DS = calculate_cc(
-                 CProf#card_profile.kid_key1,
-                 CProf#card_profile.kid_key2,
-                 ToCC),
+            ToCC_nopadding = <<CPL:16, CHL:8, ConstPart/binary, CNTR/binary, PCNTR:8, Data/binary>>,
+            ToCC = ucp_utils:pad_to(8,ToCC_nopadding),
 
-    ToCrypt = <<CNTR/binary, PCNTR:8, RC_CC_DS/binary, Data/binary>>,
+            RC_CC_DS = calculate_cc(
+                         CProf#card_profile.kid_key1,
+                         CProf#card_profile.kid_key2,
+                         ToCC),
 
-    SecureData = des3_encrypt_data(
-                   CProf#card_profile.kic_key1,
-                   CProf#card_profile.kic_key2,
-                   ToCrypt),
+            ToCrypt = <<CNTR/binary, PCNTR:8, RC_CC_DS/binary, Data/binary>>,
 
-    case size(SecureData) =< ?SINGLE_CHUNK_SIZE of
+            DataToSend = des3_encrypt_data(
+                           CProf#card_profile.kic_key1,
+                           CProf#card_profile.kic_key2,
+                           ToCrypt)
+    end,
+
+
+    case size(DataToSend) =< ?SINGLE_CHUNK_SIZE of
         true ->
-            Tpud = create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, SecureData),
+            Tpud = create_tpud(CProf, TAR, CNTR, PCNTR, CHL, CPL, DataToSend),
             ?SYS_DEBUG("Returning single smspp",[]),
             Tpud;
         false ->
             ?SYS_DEBUG("Returning concatenated smspp",[]),
-            DataParts = ucp_utils:binary_split(SecureData,?MULTIPART_CHUNK_SIZE),
+            DataParts = ucp_utils:binary_split(DataToSend,?MULTIPART_CHUNK_SIZE),
             Ref = binary:decode_unsigned(CNTR) rem 256,
             Seq = 0,
             Tot = length(DataParts),
@@ -166,7 +223,7 @@ des_encrypt_data(Key, IVec, Data) ->
 des_decrypt_data(Key, IVec, Data) ->
     crypto:des_cbc_decrypt(Key, IVec, ucp_utils:pad_to(8,Data)).
 
-create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, SecureData) ->
+create_tpud(CProf, TAR, CNTR, PCNTR, CHL, CPL, Data) ->
     KIC = CProf#card_profile.kic,
     KID = CProf#card_profile.kic,
     <<SPIA, SPIB>> = CProf#card_profile.spi,
@@ -175,7 +232,7 @@ create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, SecureData) ->
     UDHL = <<16#02>>,
     IEIa = <<16#70>>,
     IEIDLa = <<16#00>>,
-    UDL =  size(<<CPL:16, CHL:8, UDHL/binary, IEIa/binary, IEIDLa/binary, ConstPart/binary, SecureData/binary>>),
+    UDL =  size(<<CPL:16, CHL:8, UDHL/binary, IEIa/binary, IEIDLa/binary, ConstPart/binary, Data/binary>>),
 
     ?SYS_DEBUG("UDL                  ~p, ~p~n", [hex:to_hexstr(UDL), UDL]),
     ?SYS_DEBUG("UDHL                 ~p~n", [hex:to_hexstr(UDHL)]),
@@ -189,11 +246,10 @@ create_tpud(CProf, TAR, CNTR, PCNTR, RC_CC_DS, CHL, CPL, SecureData) ->
     ?SYS_DEBUG("TAR                  ~p~n",     [hex:to_hexstr(TAR)]),
     ?SYS_DEBUG("CNTR                 ~p~n",     [hex:to_hexstr(CNTR)]),
     ?SYS_DEBUG("PCNTR                ~p~n",     [hex:to_hexstr(PCNTR)]),
-    ?SYS_DEBUG("RCCCDS               ~p~n",     [hex:to_hexstr(RC_CC_DS)]),
-    ?SYS_DEBUG("SDATA                ~p~n",     [hex:to_hexstr(SecureData)]),
+    ?SYS_DEBUG("DATA                 ~p~n",     [hex:to_hexstr(Data)]),
     Xser = <<16#01, 16#03, UDHL/binary, IEIa/binary, IEIDLa/binary>>,
 
-    [{xser, Xser, data, << CPL:16, CHL:8, ConstPart/binary, SecureData/binary >>}].
+    [{xser, Xser, data, << CPL:16, CHL:8, ConstPart/binary, Data/binary >>}].
 
 
 size_PCNTR(0) ->
@@ -214,7 +270,7 @@ size_RC_CC_DS(3) ->
 size_RC_CC_DS(4) ->
     0;
 size_RC_CC_DS(_) ->
-    8.
+    0.
 
 size_CNTR(0) ->
     0;
