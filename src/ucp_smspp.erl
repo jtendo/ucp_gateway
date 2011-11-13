@@ -6,7 +6,7 @@
 -compile([export_all]).
 -compile([debug_info]).
 -define(SINGLE_CHUNK_SIZE, 130).
--define(MULTIPART_CHUNK_SIZE, 124).
+-define(MULTIPART_CHUNK_SIZE, 122).
 
 test(CNTR, String) ->
     KicKey1 = <<16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33, 16#33>>,
@@ -126,10 +126,10 @@ create_tpud_message(CProf, TAR, CNTR, Data) when is_binary(Data)->
         4 ->
             %% HARDCODED 3DES AND CC
             ?SYS_DEBUG("HARDCODED 3DES AND CC~n", []),
-            SizeOfDataToCrypt = size(Data) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
+            SizeOfDataToCrypt = size(Data) + size_CNTR(SPIA) + size_PCNTR(SPIA) + 8, %size_RC_CC_DS(SPIA),
             PCNTR = (8-(SizeOfDataToCrypt rem 8)),
 
-            CHL = size(ConstPart) + size_CNTR(SPIA) + size_PCNTR(SPIA) + size_RC_CC_DS(SPIA),
+            CHL = size(ConstPart) + size_CNTR(SPIA) + size_PCNTR(SPIA) + 8, %size_RC_CC_DS(SPIA),
             CPL = size(ConstPart) + SizeOfDataToCrypt + PCNTR + 1 , %%  1 goes for CHL TODO, check if CHi is needed, 03.48 Table 7 Null Field?!?
 
             ToCC_nopadding = <<CPL:16, CHL:8, ConstPart/binary, CNTR/binary, PCNTR:8, Data/binary, 0:(PCNTR*8)>>,
@@ -244,7 +244,8 @@ create_tpud(CProf, TAR, CNTR, PCNTR, CHL, CPL, Data) ->
     ?SYS_DEBUG("CNTR                 ~p~n",     [hex:to_hexstr(CNTR)]),
     ?SYS_DEBUG("PCNTR                ~p~n",     [hex:to_hexstr(PCNTR)]),
     ?SYS_DEBUG("DATA                 ~p~n",     [hex:to_hexstr(Data)]),
-    Xser = <<16#01, 16#03, UDHL/binary, IEIa/binary, IEIDLa/binary>>,
+    %Xser = <<16#01, 16#03, UDHL/binary, IEIa/binary, IEIDLa/binary>>,
+    Xser = <<16#01, 16#03, UDHL/binary, IEIa/binary, IEIDLa/binary, 16#02, 16#01, 16#F6>>,
 
     [{xser, Xser, data, << CPL:16, CHL:8, ConstPart/binary, Data/binary >>}].
 
@@ -331,7 +332,7 @@ create_tpud_concatenated(Seq, #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, i
             XserLL = size(XserDD),
 
             TPDU = <<CPL:16, CHL:8, SPI/binary, KIC/binary, KID/binary, TAR/binary, DataPart/binary >>,
-            Xser = <<16#01, XserLL:8, XserDD/binary>>,
+            Xser = <<16#01, XserLL:8, XserDD/binary, 16#02, 16#01, 16#F6>>,
 
             ?SYS_DEBUG("Xser                 ~p~n",[hex:to_hexstr(Xser)]),
             {xser, Xser, data, TPDU};
@@ -343,7 +344,7 @@ create_tpud_concatenated(Seq, #concatenated_tpud{ieia = IEIa, ieidla = IEIDLa, i
             XserLL = size(XserDD),
 
             TPDU = <<DataPart/binary >>,
-            Xser = <<16#01, XserLL:8, XserDD/binary>>,
+            Xser = <<16#01, XserLL:8, XserDD/binary, 16#02, 16#01, 16#F6>>,
 
             ?SYS_DEBUG("Xser                 ~p~n",[hex:to_hexstr(Xser)]),
             {xser, Xser, data, TPDU}
