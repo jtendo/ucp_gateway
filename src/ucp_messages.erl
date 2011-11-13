@@ -54,12 +54,15 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message, Xser) when is_binary(Messag
               adc = Receiver,
               otoa = OTOA,
               nrq = "1",
+              nt = "3",
+              npid = "0539",
               rpid = "0127",
               mcls = "2", %% class message 2
               xser = lists:flatten(HexXser),
               mt = "4",
               nb = integer_to_list(length(UCPMsg)*4),
-              msg = UCPMsg},
+              msg = UCPMsg,
+              pr = "0"},
     Header = #ucp_header{
               trn = ucp_utils:trn_to_str(Trn),
               o_r = "O",
