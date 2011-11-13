@@ -1,9 +1,25 @@
+%% FIXME compilation warnings
+%src/ucp_smspp.erl:14: Warning: function test/2 is unused
+%src/ucp_smspp.erl:213: Warning: function des3_decrypt_data/3 is unused
+%src/ucp_smspp.erl:217: Warning: function des3_encrypt_data/4 is unused
+%src/ucp_smspp.erl:220: Warning: function des_encrypt_data/3 is unused
+%src/ucp_smspp.erl:223: Warning: function des_decrypt_data/3 is unused
+%src/ucp_smspp.erl:357: Warning: function swap_msisdn/1 is unused
+%src/ucp_smspp.erl:373: Warning: function create_device_tlv/1 is unused
+%src/ucp_smspp.erl:388: Warning: function create_tp_address/1 is unused
+%src/ucp_smspp.erl:402: Warning: function create_tpdu/1 is unused
+%src/ucp_smspp.erl:444: Warning: function create_apdu/1 is unused
+%src/ucp_smspp.erl:466: Warning: function create_whole_command/1 is unused
+%
 -module(ucp_smspp).
 -author('rafal.galczynski@jtendo.com').
 
+-export([create_tpud_message_no_crypt/2]).
+-export([create_tpud_message/2]).
+-export([parse_command_packet/1]).
+
 -include("apdu.hrl").
 -include("logger.hrl").
--compile([export_all]).
 -compile([debug_info]).
 -define(SINGLE_CHUNK_SIZE, 130).
 -define(MULTIPART_CHUNK_SIZE, 122).
