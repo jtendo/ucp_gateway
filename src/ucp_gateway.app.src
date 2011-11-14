@@ -25,6 +25,7 @@
           ucp_ia5,
           ucp_messages,
           ucp_utils,
+          ucp_event,
           gen_fsm2
          ]},
    {mod, { ucp_gateway, []}},

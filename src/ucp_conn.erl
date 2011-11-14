@@ -22,7 +22,7 @@
          get_reverse_config/1,
          get_name/1,
          send_txt_message/3,
-         send_bin_message/3,
+         send_bin_message/4,
          close/1]).
 
 %% gen_fsm callbacks
@@ -111,8 +111,8 @@ get_reverse_config(Handle) ->
 send_txt_message(Handle, Receiver, Message) ->
     gen_fsm:sync_send_event(Handle, {send_txt_message, {Receiver, Message}}, ?CALL_TIMEOUT).
 
-send_bin_message(Handle, Receiver, Message) ->
-    gen_fsm:sync_send_event(Handle, {send_bin_message, {Receiver, Message}}, ?CALL_TIMEOUT).
+send_bin_message(Handle, Receiver, Message, Opts) ->
+    gen_fsm:sync_send_event(Handle, {send_bin_message, {Receiver, Message, Opts}}, ?CALL_TIMEOUT).
 
 %%% --------------------------------------------------------------------
 %%% Shutdown connection (and process) asynchronous.
@@ -415,46 +415,28 @@ send_auth_message(State) ->
 
 % {ok, newstate} lub {error, message}
 process_event(Event, From, State) ->
-    {ok, Messages, NewState} = generate_messages(Event, State),
-    send_messages(Event, From, Messages, NewState).
+    {ok, Message, NewState} = generate_message(Event, State),
+    send_message(Event, From, Message, NewState).
 
-send_messages(_Event, _From, [], State) ->
-    % nothing to send or end of messages
-    {ok, State};
-send_messages(Event, From, [{TRN, Message}|Rest], State) ->
+send_message(Event, From, {TRN, Message}, State) ->
     ?SYS_DEBUG("Sending message: ~p", [Message]),
     case gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)) of
         ok ->
             Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, TRN}),
             NewDict = dict:store(TRN, [{Timer, Event, From}], State#state.dict),
-            send_messages(Event, From, Rest, State#state{dict = NewDict});
+            {ok, State#state{dict = NewDict}};
         Error -> Error
    end.
 
-generate_messages({send_txt_message, {Receiver, Message}}, State) ->
+generate_message({send_txt_message, {Receiver, Message}}, State) ->
     TRN = ucp_utils:get_next_trn(State#state.trn),
     {ok, Msg} = ucp_messages:create_cmd_51_text(TRN, State#state.default_originator, Receiver, Message),
-    {ok, [{TRN, Msg}], State#state{trn = TRN}};
+    {ok, {TRN, Msg}, State#state{trn = TRN}};
 
-generate_messages({send_bin_message, {Receiver, Message}}, State) ->
-    [{cntr, CNTR}] = ets:lookup(sms, cntr),
-    ets:update_counter(sms, cntr, 2),
-    Tpdus = ucp_smspp:create_tpud_message_no_crypt(CNTR, Message),
-    create_bin_message(Receiver, Tpdus, State#state{cntr = CNTR}).
-
-% Process binary parts
-create_bin_message(Receiver, Bins, State) ->
-    create_bin_message(Receiver, Bins, State, []).
-
-create_bin_message(_Receiver, [], State, Result) ->
-    {ok, lists:reverse(Result), State};
-
-create_bin_message(Receiver, [{xser, Xser, data, Bin}|Tail], State, Result) ->
+generate_message({send_bin_message, {Receiver, Message, Opts}}, State) ->
     TRN = ucp_utils:get_next_trn(State#state.trn),
-    {ok, Msg} = ucp_messages:create_cmd_51_binary(TRN, State#state.default_originator,
-            Receiver, Bin, Xser),
-    create_bin_message(Receiver, Tail, State#state{trn = TRN}, [{TRN, Msg}|Result]).
-
+    {ok, Msg} = ucp_messages:create_cmd_51_binary(TRN, State#state.default_originator, Receiver, Message, Opts),
+    {ok, {TRN, Msg}, State#state{trn = TRN}}.
 
 cancel_timer(undefined) ->
     ok;
@@ -554,15 +536,10 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
     %TODO: Check sending result = Don't know what to do when error!!
     % Handle message
-    case Body#ucp_cmd_5x.mt of
-        "4" -> % STK message
-            % TODO: decode OAdC
-            {cntr, _, data, Data} = ucp_smspp:parse_command_packet(Body#ucp_cmd_5x.msg),
-            Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
-            gen_event:notify(dynx_router, {rx_msg, {Sender, Data}});
-        _Else ->
-            ignore
-    end,
+    Recipient = Body#ucp_cmd_5x.adc,
+    Data = Body#ucp_cmd_5x.msg,
+    Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
+    gen_event:notify(ucp_event, {ucp_5x, {Recipient, Sender, Data}}),
     {ok, State};
 
 process_message({Header = #ucp_header{ot = "53", o_r = "O"}, Body}, State) ->
