@@ -1,6 +1,6 @@
 -author('soda@t61p').
 
--define(SPI_NO_RC_CC_DS,                          2#00000000).      %% 00 00
+-define(SPI_NO_RC_CC_DS,                          2#00000000). %% 00 00
 -define(SPI_RC,                                   2#00000001). %% 00 01
 -define(SPI_CC,                                   2#00000010). %% 00 02
 -define(SPI_DS,                                   2#00000011). %% 00 03
@@ -48,48 +48,21 @@
 -define(KID_ALGORITHM_3DES3,                     2#00001000).
 -define(KID_ALGORITHM_KID_RESERVED,              2#00001100).
 
+-define(ZERO_IV,                                 <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>).
 
-
--record(apdu, {
-          tag,                 %% b
-          length,              %% b or 2b
-          device_identity_tlv, %% 4b
-          address_tlv,         %% 4-13b -> address_tlv
-          sms_tpdu             %% 15-166b
-         }).
-
--record(device_tlv, {
-          tag,                 %% b
-          length,              %% b
-          source,              %% b
-          destination          %% b
-         }).
-
--record(tp_address, {
-          length,              %% b
-          ton_npi,             %% b
-          address              %% up to 10b
-         }).
-
-
--record(tpdu, {
-          tag,                 %% b
-          length,              %% 2b
-          mti_mms_udhl_rp,
-          address_len,         %% b
-          ton_npi,             %% b
-          address_value,       %% 0-10 byte
-          tp_pid,              %% b
-          tp_dcs,              %% b
-          tp_scts,             %% 7b
-          tp_udl,              %% integer?
-          tp_ud                %% up tp 140b -> command_packet
+-record(sim_profile, {
+          spi,
+          kic,
+          kid,
+          kic_key1,
+          kic_key2,
+          kic_key3,
+          kid_key1,
+          kid_key2,
+          kid_key3
          }).
 
 -record(tpud, {
-          udhl,                %% b
-          ieia,                %% b
-          iedla,               %% b
           cpl,                 %% 2b
           chl,                 %% b
           spi,                 %% 2b
@@ -99,51 +72,5 @@
           cntr,                %% 5b
           pcntr,               %% 1b
           rc_cc_ss,            %% 0/4/8b
-          secured_data         %% ?
+          data                 %% ?
          }).
-
--record(concatenated_tpud, {
-          udl,                 %% Indicates the length of the entire SM
-          udhl,                %% b he first octet of the content or User Data part of the
-                               %% Short Message itself. Length of the total
-                               %% User Data Header, in this case, includes
-                               %% the length of IEIa + IEIDLa + IEDa + IEIb + IEIDLb + IEDb
-          ieia,                %% b [00] identifies this Header as a concatenation
-                               %% control header defined in TS 23.040 [3].
-          ieidla,              %% b ength of the concatenation control header (= 3).
-          ieida,               %% 3b These octets contain the reference number,
-                               %% sequence number and total number of
-                               %% messages in the sequence, as defined in TS 23.040 [3].
-          ieib,                %% Identifies this element of the UDH as
-                               %% the Command Packet Identifier. CPI=70
-          ieidlb,              %% Length of this object, in this case the
-                               %% length of IEDb alone, which is zero,
-                               %% indicating that IEDb is a null field.
-          %% iedb,                %% Null field.
-          cpl,                 %% Length of the Command Packet (CPL),
-                               %% coded over 2 octets, and shall not be
-                               %% coded according to ISO/IEC 7816-6 [8].
-          %% chi,                 %% (CHI) Null field.
-          chl,                 %% Length of the Command Header (CHL),
-                               %% coded over one octet, and shall not be
-                               %% coded according to ISO/IEC 7816-6 [8].
-          spi,                 %% The remainder of the Command Header. Security Parameter Indicator
-          kic,                 %% Key and algorithm Identifier for ciphering.
-          kid,                 %% Key and algorithm Identifier for RC/CC/DS.
-          tar,                 %% Coding is application dependent.
-          cntr,                %% Replay detection and Sequence Integrity counter.
-          pcntr,               %% This indicates the number of padding octets used
-                               %% for ciphering at the end of the secured data.
-          rc_cc_ds,            %% Length depends on the algorithm. A typical value is 8 octets if
-                               %% used, and for a DS could be 48 or more octets; the minimum
-                               %% should be 4 octets.
-
-
-          secured_data_part    %% Contains the first portion of the Secured Data.
-                               %% The remaining Secured Data will be contained
-                               %% in subsequent concatenated short messages.
-
-         }).
-
--record(card_profile, {spi, kic, kid, kic_key1, kic_key2, kid_key1, kid_key2}).
-
