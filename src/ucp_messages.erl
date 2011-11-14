@@ -133,7 +133,7 @@ check_options(Rec, [{notification_request, Bool}|T])
   when Bool == true ->
     check_options(Rec#ucp_cmd_5x{nrq = "1"}, T);
 check_options(Rec, [{extra_services, Value}|T])
-  when is_list(Value) ->
+  when is_binary(Value) ->
     {ok, HexXser} = binpp:convert(Value),
     check_options(Rec#ucp_cmd_5x{xser = lists:flatten(HexXser)}, T);
 check_options(Rec, [{validity_period, Value}|T]) % DDMMYYHHmm
