@@ -39,22 +39,17 @@
 
 -export([handle_state/2]).
 
--define(CFG, fun(Key,Default) ->
-            Terms = confetti:fetch(ucp_conf),
-            proplists:get_value(Key, Terms, Default)
-    end).
-
 -define(SERVER, ?MODULE).
--define(AUTH_TIMEOUT, ?CFG(auth_timeout, 5000)).
--define(CMD_TIMEOUT, ?CFG(cmd_timeout, 3000)).
--define(SEND_TIMEOUT, ?CFG(send_timeout, 1000)).
--define(RETRY_TIMEOUT, ?CFG(retry_timeout, 10000)).
--define(CALL_TIMEOUT, ?CFG(call_timeout, 3000)).
+-define(AUTH_TIMEOUT, ?CFG(auth_timeout, ucp_conf, 5000)).
+-define(CMD_TIMEOUT, ?CFG(cmd_timeout, ucp_conf, 3000)).
+-define(SEND_TIMEOUT, ?CFG(send_timeout, ucp_conf, 1000)).
+-define(RETRY_TIMEOUT, ?CFG(retry_timeout, ucp_conf, 10000)).
+-define(CALL_TIMEOUT, ?CFG(call_timeout, ucp_conf, 3000)).
 -define(CONNECTION_TIMEOUT, ?CFG(connection_timeout, 2000)).
 %% Grace period after auth errors:
--define(GRACEFUL_RETRY_TIMEOUT, ?CFG(graceful_retry_timeout, 5000)).
--define(MIN_MESSAGE_TRN, ?CFG(min_message_trn, 0)).
--define(MAX_MESSAGE_TRN, ?CFG(max_message_trn, 99)).
+-define(GRACEFUL_RETRY_TIMEOUT, ?CFG(graceful_retry_timeout, ucp_conf, 5000)).
+-define(MIN_MESSAGE_TRN, ?CFG(min_message_trn, ucp_conf, 0)).
+-define(MAX_MESSAGE_TRN, ?CFG(max_message_trn, ucp_conf, 99)).
 
 -define(TCP_OPTIONS, [binary, {packet, 0}, {active, true}, {reuseaddr, true},
         {keepalive, true}, {send_timeout, ?SEND_TIMEOUT}, {send_timeout_close, false}]).
