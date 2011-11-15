@@ -25,6 +25,8 @@ create_tpud(CNTR_VAL, Data) when is_binary(Data),
                                  is_integer(CNTR_VAL) ->
     SP = get_sim_profile(),
     TAR = ?CFG(tar, sim_profile_conf, <<>>),
+    ?SYS_DEBUG("SIM           ~p~n", [SP]),
+    ?SYS_DEBUG("TAR           ~p~n", [hex:to_hexstr(TAR)]),
     create_tpud(SP, TAR, CNTR_VAL, Data).
 
 %%--------------------------------------------------------------------
@@ -51,10 +53,11 @@ create_tpud(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
     {cc, {CC_TYPE, CC_SIZE}, cntr, IS_CNTR, enc, IS_ENC} = analyze_spi(SP#sim_profile.spi),
 
     CNTR = calculate_cntr(IS_CNTR, CNTR_VAL),
-    ?SYS_DEBUG("KIC           ~p,~p,~p,~n",[hex:to_hexstr(KIC), KIC, analyze_kic(<<KIC>>)]),
-    ?SYS_DEBUG("KID           ~p,~p,~p,~n",[hex:to_hexstr(KID), KID, analyze_kid(<<KID>>)]),
-    ?SYS_DEBUG("SPI           ~p, ~p~n", [hex:to_hexstr(SPI), analyze_spi(SPI)]),
     ?SYS_DEBUG("CNTR          ~p~n", [hex:to_hexstr(CNTR)]),
+
+    ?SYS_DEBUG("KIC           ~p,~p,~p,~n",[hex:to_hexstr(KIC), KIC, analyze_kic(KIC)]),
+    ?SYS_DEBUG("KID           ~p,~p,~p,~n",[hex:to_hexstr(KID), KID, analyze_kid(KID)]),
+    ?SYS_DEBUG("SPI           ~p, ~p~n", [hex:to_hexstr(SPI), analyze_spi(SPI)]),
     case IS_ENC of
         noenc->
             PCNTR = <<0>>,
