@@ -1,30 +1,49 @@
 -module(ucp_smspp).
 -author('rafal.galczynski@jtendo.com').
 
--include("apdu.hrl").
+-include("0348packet.hrl").
 -include("logger.hrl").
+-include("utils.hrl").
+
 -export([
-         create_tpud_message/4,
-         parse_command_packet/1,
+         create_tpud/4,
+         create_tpud/2,
+         parse_0348packet/1,
          test/1]).
 
 %%--------------------------------------------------------------------
 %% @public
 %% @doc
-%% Function for creating tpud binary message
+%% Function for creating tpud command packet
 %% after GSM 03.48
 %%
 %% @spec create_tpud_message(SP::Record, TAR::Binary,
 %%                           CNTR_VAL::integer(), Data::Binary) -> {data, Binary}
 %% @end
 %%--------------------------------------------------------------------
-create_tpud_message(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
-                                                  is_binary(TAR),
-                                                  is_binary(Data),
-                                                  is_integer(CNTR_VAL) ->
+create_tpud(CNTR_VAL, Data) when is_binary(Data),
+                                 is_integer(CNTR_VAL) ->
+    SP = get_sim_profile(),
+    TAR = ?CFG(tar, sim_profile_conf, <<>>),
+    create_tpud(SP, TAR, CNTR_VAL, Data).
+
+%%--------------------------------------------------------------------
+%% @public
+%% @doc
+%% Function for creating tpud command packet
+%% after GSM 03.48
+%%
+%% @spec create_tpud_message(SP::Record, TAR::Binary,
+%%                           CNTR_VAL::integer(), Data::Binary) -> {data, Binary}
+%% @end
+%%--------------------------------------------------------------------
+create_tpud(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
+                                          is_binary(TAR),
+                                          is_binary(Data),
+                                          is_integer(CNTR_VAL) ->
 
     KIC = SP#sim_profile.kic,
-    KID = SP#sim_profile.kic,
+    KID = SP#sim_profile.kid,
     SPI = SP#sim_profile.spi,
 
     ConstPart = <<SPI/binary, KIC/binary, KID/binary, TAR/binary>>,
@@ -76,64 +95,32 @@ create_tpud_message(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
 
 
 test(String) ->
-    SP = get_sim_profile(),
-    confetti:use(sim_profile),
-    Conf = confetti:fetch(sim_profile),
-    TAR = proplists:get_value(tar, Conf, <<>>),
     CNTR = 0,
     Data = erlang:list_to_binary(String),
-    ?SYS_DEBUG("SP             ~p~n", [SP]),
-    ?SYS_DEBUG("TAR            ~p~n", [hex:to_hexstr(TAR)]),
-    ?SYS_DEBUG("CNTR           ~p~n", [hex:to_hexstr(CNTR)]),
-    ?SYS_DEBUG("DATA           ~p~n", [Data]),
-    create_tpud_message(SP, TAR, CNTR, Data).
+    create_tpud(CNTR, Data).
 
 get_sim_profile() ->
-    confetti:use(sim_profile),
-    Conf = confetti:fetch(sim_profile),
-    KicKey1 = proplists:get_value(kic1, Conf, <<>>),
-    %% SPIA =
-    %%     ?SPI_NO_RC_CC_DS bor
-    %%     ?SPI_NO_ENCRYPTION bor
-    %%     ?SPI_COUNTER_PROCESS_IF_HIGHER_THEN_RE,
-    %% SPIB =
-    %%     ?SPI_POR_TO_SE bor
-    %%     ?SPI_POR_NO_RC_CC_DS bor
-    %%     ?SPI_POR_NOT_ENCRYPTED bor
-    %%     ?SPI_POR_SMS_DELIVER_REPORT,
+    confetti:use(sim_profile_conf, [
+                               {location, {"sim_profile.conf", "conf"}},
+                               {subscribe, false}
+                              ]),
 
-    SPIA =
-        ?SPI_CC bor
-        ?SPI_ENCRYPTION bor
-        ?SPI_COUNTER_PROCESS_IF_HIGHER_THEN_RE,
-    SPIB =
-        ?SPI_POR_TO_SE bor
-        ?SPI_POR_NO_RC_CC_DS bor
-        ?SPI_POR_NOT_ENCRYPTED bor
-        ?SPI_POR_SMS_DELIVER_REPORT,
+    SPIA = ?CFG(spia, sim_profile_conf, 16#16),
+    SPIB = ?CFG(spib, sim_profile_conf, 16#01),
 
     SPI = <<SPIA:8, SPIB:8>>,
+    KIC = ?CFG(kic, sim_profile_conf, 0),
+    KID = ?CFG(kid, sim_profile_conf, 0),
 
-    KicKeyIndex = proplists:get_value(kic_key_index, Conf, 0),
-    KidKeyIndex = proplists:get_value(kid_key_index, Conf, 0),
-
-    KIC = ?KIC_ALGORITHM_DES bor ?KIC_ALGORITHM_3DES2 bor KicKeyIndex,
-    KID = ?KID_ALGORITHM_DES bor ?KID_ALGORITHM_3DES2 bor KidKeyIndex,
-
-    KicKey1 = proplists:get_value(kic1, Conf, <<>>),
-    KicKey2 = proplists:get_value(kic2, Conf, <<>>),
-
-    KidKey1 = proplists:get_value(kid1, Conf, <<>>),
-    KidKey2 = proplists:get_value(kid2, Conf, <<>>),
+    KicKey = ?CFG(kickey, sim_profile_conf, 0),
+    KidKey = ?CFG(kidkey, sim_profile_conf, 0),
 
     SP = #sim_profile{
       spi=SPI,
       kic= <<KIC>>,
       kid= <<KID>>,
-      kic_key1=KicKey1,
-      kic_key2=KicKey2,
-      kid_key1=KidKey1,
-      kid_key2=KidKey2
+      kickey=KicKey,
+      kidkey=KidKey
      },
     SP.
 
@@ -151,21 +138,17 @@ calculate_cc(Key1, Key2, Data) ->
     [Block| Rest] = ucp_utils:binary_split(Data, 8),
     IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
     Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, Block),
-    ?SYS_DEBUG("block          ~p~n",[hex:to_hexstr(Block)]),
-    ?SYS_DEBUG("res            ~p~n",[hex:to_hexstr(Res)]),
     [ NextBlock | RestBlocks ] = Rest,
     calculate_cc(Key1, Key2, Res, NextBlock, RestBlocks).
 
 calculate_cc(Key1, Key2, LastBlock, Block, []) ->
     Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, LastBlock, Block),
-    ?SYS_DEBUG("res            ~p~n",[hex:to_hexstr(Res)]),
+    ?SYS_DEBUG("CHECKSUM      ~p~n",[hex:to_hexstr(Res)]),
     Res;
 
 calculate_cc(Key1, Key2, LastBlock, Block, Rest) ->
     Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, LastBlock, Block),
     [ NextBlock | RestBlocks ] = Rest,
-    ?SYS_DEBUG("block          ~p~n",[hex:to_hexstr(Block)]),
-    ?SYS_DEBUG("res            ~p~n",[hex:to_hexstr(Res)]),
     calculate_cc(Key1, Key2, Res, NextBlock, RestBlocks).
 
 %%--------------------------------------------------------------------
@@ -197,9 +180,11 @@ prepare_cc(nocc, _SP, _Data) ->
 prepare_cc(rc, _SP, _Data) ->
     <<>>;
 prepare_cc(cc, SP, Data) ->
+    KidKey = hex:hexstr_to_bin(SP#sim_profile.kidkey),
+    [Key1, Key2] = ucp_utils:binary_split(KidKey, 8),
     calculate_cc(
-      SP#sim_profile.kid_key1,
-      SP#sim_profile.kid_key2,
+      Key1,
+      Key2,
       Data);
 prepare_cc(ds, _SP, _Data) ->
     <<>>.
@@ -298,18 +283,17 @@ analyze_kic(<<_KeyIdx:4, Type:2, _Inf:2>>) ->
 %%--------------------------------------------------------------------
 
 crypt_data(tripledes2key, SP, Data) ->
-    Key1 = SP#sim_profile.kic_key1,
-    Key2 = SP#sim_profile.kic_key2,
+    KicKey = hex:hexstr_to_bin(SP#sim_profile.kickey),
+    [Key1, Key2] = ucp_utils:binary_split(KicKey, 8),
     crypto:des3_cbc_encrypt(Key1, Key2, Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data));
 
 crypt_data(tripledes3key, SP, Data) ->
-    Key1 = SP#sim_profile.kic_key1,
-    Key2 = SP#sim_profile.kic_key2,
-    Key3 = SP#sim_profile.kic_key3,
+    KicKey = hex:hexstr_to_bin(SP#sim_profile.kickey),
+    [Key1, Key2, Key3] = ucp_utils:binary_split(KicKey, 8),
     crypto:des3_cbc_encrypt(Key1, Key2, Key3, ?ZERO_IV, ucp_utils:pad_to(8,Data));
 
 crypt_data(des_cbc, SP, Data) ->
-    Key1 = SP#sim_profile.kic_key1,
+    Key1 = SP#sim_profile.kickey,
     crypto:des_cbc_encrypt(Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data)).
 
 
@@ -323,10 +307,10 @@ crypt_data(des_cbc, SP, Data) ->
 %% @end
 %%--------------------------------------------------------------------
 
-parse_command_packet(Packet) when is_list(Packet)->
-    parse_command_packet(hex:hexstr_to_bin(Packet));
+parse_0348packet(Packet) when is_list(Packet)->
+    parse_0348packet(hex:hexstr_to_bin(Packet));
 
-parse_command_packet(Packet) when is_binary(Packet)->
+parse_0348packet(Packet) when is_binary(Packet)->
     <<_CPI:8, _CPL:8, _CHL:8, _SPI:16, _KIC:8, _KID:8, _TAR:24, CNTR:40, _PCNTR:8, Data/binary>> = Packet,
     {cntr, CNTR, data, Data}.
 

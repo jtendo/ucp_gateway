@@ -54,12 +54,8 @@
           spi,
           kic,
           kid,
-          kic_key1,
-          kic_key2,
-          kic_key3,
-          kid_key1,
-          kid_key2,
-          kid_key3
+          kickey,
+          kidkey
          }).
 
 -record(tpud, {
