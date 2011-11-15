@@ -1,7 +1,7 @@
 -module(ucp_smspp).
 -author('rafal.galczynski@jtendo.com').
 
--include("apdu2.hrl").
+-include("apdu.hrl").
 -include("logger.hrl").
 -export([
          create_tpud_message/4,
