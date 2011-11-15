@@ -51,8 +51,8 @@ create_tpud(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
     {cc, {CC_TYPE, CC_SIZE}, cntr, IS_CNTR, enc, IS_ENC} = analyze_spi(SP#sim_profile.spi),
 
     CNTR = calculate_cntr(IS_CNTR, CNTR_VAL),
-    ?SYS_DEBUG("KIC           ~p, ~p~n", [KIC, analyze_kic(KIC)]),
-    ?SYS_DEBUG("KID           ~p, ~p~n", [KID, analyze_kic(KID)]),
+    ?SYS_DEBUG("KIC           ~p,~p,~p,~n",[hex:to_hexstr(KIC), KIC, analyze_kic(<<KIC>>)]),
+    ?SYS_DEBUG("KID           ~p,~p,~p,~n",[hex:to_hexstr(KID), KID, analyze_kid(<<KID>>)]),
     ?SYS_DEBUG("SPI           ~p, ~p~n", [hex:to_hexstr(SPI), analyze_spi(SPI)]),
     ?SYS_DEBUG("CNTR          ~p~n", [hex:to_hexstr(CNTR)]),
     case IS_ENC of
@@ -308,6 +308,29 @@ crypt_data(des_cbc, SP, Data) ->
     Key1 = SP#sim_profile.kickey,
     crypto:des_cbc_encrypt(Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data)).
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Function returns decrypted data using given algo
+%%
+%% @spec crypt_data(algo::Atom, SP::Record, Data::Binary) -> Binary
+%% @end
+%%--------------------------------------------------------------------
+
+decrypt_data(tripledes2key, SP, Data) ->
+    KicKey = hex:hexstr_to_bin(SP#sim_profile.kickey),
+    [Key1, Key2] = ucp_utils:binary_split(KicKey, 8),
+    crypto:des3_cbc_decrypt(Key1, Key2, Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data));
+
+decrypt_data(tripledes3key, SP, Data) ->
+    KicKey = hex:hexstr_to_bin(SP#sim_profile.kickey),
+    [Key1, Key2, Key3] = ucp_utils:binary_split(KicKey, 8),
+    crypto:des3_cbc_decrypt(Key1, Key2, Key3, ?ZERO_IV, ucp_utils:pad_to(8,Data));
+
+decrypt_data(des_cbc, SP, Data) ->
+    Key1 = SP#sim_profile.kickey,
+    crypto:des_cbc_decrypt(Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data)).
+
 
 %%--------------------------------------------------------------------
 %% @private
@@ -320,10 +343,49 @@ crypt_data(des_cbc, SP, Data) ->
 %%--------------------------------------------------------------------
 
 parse_0348packet(Packet) when is_list(Packet)->
-    parse_0348packet(hex:hexstr_to_bin(Packet));
+    SP = get_sim_profile(),
+    parse_0348packet(SP, hex:hexstr_to_bin(Packet));
 
 parse_0348packet(Packet) when is_binary(Packet)->
-    <<_CPI:8, _CPL:8, _CHL:8, _SPI:16, _KIC:8, _KID:8, _TAR:24, CNTR:40, _PCNTR:8, Data/binary>> = Packet,
-    {cntr, CNTR, data, Data}.
+    SP = get_sim_profile(),
+    parse_0348packet(SP, Packet).
+
+parse_0348packet(SP, Packet) when is_list(Packet)->
+    parse_0348packet(SP, hex:hexstr_to_bin(Packet));
+
+parse_0348packet(SP, Packet) when is_binary(Packet)->
+    <<CPI:8, CPL:8, CHL:8, SPIA:8, SPIB:8, KIC:8, KID:8, TAR:24, Rest/binary>> = Packet,
+    ?SYS_DEBUG("CPI                  ~p,~p~n",[hex:to_hexstr(CPI), CPI]),
+    ?SYS_DEBUG("CPL                  ~p,~p~n",[hex:to_hexstr(CPL), CPL]),
+    ?SYS_DEBUG("CHL                  ~p,~p~n",[hex:to_hexstr(CHL), CHL]),
+    ?SYS_DEBUG("SPIA                 ~p,~p~n",[hex:to_hexstr(SPIA), SPIA]),
+    ?SYS_DEBUG("SPIB                 ~p,~p~n",[hex:to_hexstr(SPIB), SPIB]),
+    ?SYS_DEBUG("KIC                  ~p,~p,~p,~n",[hex:to_hexstr(KIC), KIC, analyze_kic(<<KIC>>)]),
+    ?SYS_DEBUG("KID                  ~p,~p,~p,~n",[hex:to_hexstr(KID), KID, analyze_kid(<<KID>>)]),
+    ?SYS_DEBUG("TAR                  ~p,~p~n",[hex:to_hexstr(TAR), TAR]),
+    {cc, {CC_TYPE, CC_SIZE}, cntr, IS_CNTR, enc, IS_ENC} = analyze_spi(<<SPIA:8, SPIB:8>>),
+    ?SYS_DEBUG("CC_TYPE              ~p~n",[CC_TYPE]),
+    ?SYS_DEBUG("CC_SIZE              ~p~n",[CC_SIZE]),
+    ?SYS_DEBUG("IS_CNTR              ~p~n",[IS_CNTR]),
+    ?SYS_DEBUG("IN_ENC               ~p~n",[IS_ENC]),
+    case IS_ENC of
+        noenc ->
+            <<CNTR:40, PCNTR:8, Data/binary>> = Rest,
+            ?SYS_DEBUG("CNTR                 ~p~n",[CNTR]),
+            ?SYS_DEBUG("PCNTR                ~p~n",[PCNTR]),
+            ?SYS_DEBUG("DATA                 ~p~n",[Data]),
+            {cntr, CNTR, data, Data};
+        enc ->
+            ?SYS_DEBUG("CRYPTED               ~p~n",[Rest]),
+            Decrypted = decrypt_data(analyze_kic(<<KIC>>), SP, Rest),
+            <<CNTR:40, PCNTR:8, RC_CC_DS:CC_SIZE, PaddedData/binary>> = Decrypted,
+            ?SYS_DEBUG("CNTR                 ~p~n",[CNTR]),
+            ?SYS_DEBUG("PCNTR                ~p~n",[PCNTR]),
+            ?SYS_DEBUG("RC_CC_DS             ~p~n",[RC_CC_DS]),
+            Data = erlang:binary_part(PaddedData, {0, byte_size(PaddedData)-PCNTR}),
+            ?SYS_DEBUG("PADDED               ~p~n",[PaddedData]),
+            ?SYS_DEBUG("DATA                 ~p~n",[Data]),
+            {cntr, CNTR, data, Data}
+    end.
 
 
