@@ -51,45 +51,44 @@ create_tpud(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
     {cc, {CC_TYPE, CC_SIZE}, cntr, IS_CNTR, enc, IS_ENC} = analyze_spi(SP#sim_profile.spi),
 
     CNTR = calculate_cntr(IS_CNTR, CNTR_VAL),
-    ?SYS_DEBUG("KIC            ~p, ~p~n", [KIC, analyze_kic(KIC)]),
-    ?SYS_DEBUG("KID            ~p~n", [KID]),
-    ?SYS_DEBUG("SPI            ~p~n", [hex:to_hexstr(SPI)]),
-    ?SYS_DEBUG("CNTR           ~p~n", [hex:to_hexstr(CNTR)]),
+    ?SYS_DEBUG("KIC           ~p, ~p~n", [KIC, analyze_kic(KIC)]),
+    ?SYS_DEBUG("KID           ~p, ~p~n", [KID, analyze_kic(KID)]),
+    ?SYS_DEBUG("SPI           ~p, ~p~n", [hex:to_hexstr(SPI), analyze_spi(SPI)]),
+    ?SYS_DEBUG("CNTR          ~p~n", [hex:to_hexstr(CNTR)]),
     case IS_ENC of
         noenc->
             PCNTR = <<0>>,
             RC_CC_DS = <<>>,
-            ?SYS_DEBUG("PCNTR  ~p~n", [hex:to_hexstr(PCNTR)]),
-            ?SYS_DEBUG("CC     ~p~n", [hex:to_hexstr(RC_CC_DS)]),
+            ?SYS_DEBUG("PCNTR         ~p~n", [hex:to_hexstr(PCNTR)]),
+            ?SYS_DEBUG("CC            ~p~n", [hex:to_hexstr(RC_CC_DS)]),
 
             CHL = size(ConstPart) + size(CNTR)  + size(RC_CC_DS) + size(PCNTR),
             CPL = size(ConstPart) + size(CNTR) + size(PCNTR) + size(<<CHL>>) + size(Data),
-            ?SYS_DEBUG("CHL    ~p,~p~n", [CHL, hex:to_hexstr(CHL)]),
-            ?SYS_DEBUG("CPL    ~p,~p~n", [CPL, hex:to_hexstr(CPL)]),
+            ?SYS_DEBUG("CHL           ~p,~p~n", [CHL, hex:to_hexstr(CHL)]),
+            ?SYS_DEBUG("CPL           ~p,~p~n", [CPL, hex:to_hexstr(CPL)]),
 
             DataToSend = <<CNTR/binary, PCNTR/binary, Data/binary>>,
-            ?SYS_DEBUG("DATA   ~p~n", [hex:to_hexstr(DataToSend)]),
+            ?SYS_DEBUG("DATA          ~p~n", [hex:to_hexstr(DataToSend)]),
             {data, << CPL:16, CHL:8, ConstPart/binary, DataToSend/binary >>};
         enc ->
             SizeOfDataToCrypt = size(Data) + size(CNTR) + CC_SIZE + 1, %% +1 for PCNTR
-            PCNTR = (8-(SizeOfDataToCrypt rem 8)),
-            ?SYS_DEBUG("PCNTR  ~p~n", [hex:to_hexstr(PCNTR)]),
+
+            PCNTR = prepare_pcntr(SizeOfDataToCrypt),
+            ?SYS_DEBUG("PCNTR         ~p,~p~n", [PCNTR, hex:to_hexstr(PCNTR)]),
 
             CHL = size(ConstPart) + size(CNTR) + size(<<PCNTR>>) + CC_SIZE,
             CPL = size(ConstPart) + SizeOfDataToCrypt + PCNTR + size(<<CHL>>),
-            ?SYS_DEBUG("CHL    ~p~n", [CHL]),
-            ?SYS_DEBUG("CPL    ~p~n", [CPL]),
+            ?SYS_DEBUG("CHL           ~p,~p~n", [CHL, hex:to_hexstr(CHL)]),
+            ?SYS_DEBUG("CPL           ~p,~p~n", [CPL, hex:to_hexstr(CPL)]),
 
             ToCC_nopadding = <<CPL:16, CHL:8, ConstPart/binary, CNTR/binary, PCNTR:8, Data/binary, 0:(PCNTR*8)>>,
             ToCC = ucp_utils:pad_to(8,ToCC_nopadding),
-            ?SYS_DEBUG("TOCC   ~p~n", [hex:to_hexstr(ToCC)]),
-
             RC_CC_DS = prepare_cc(CC_TYPE, SP, ToCC),
-            ?SYS_DEBUG("CC     ~p~n", [hex:to_hexstr(RC_CC_DS)]),
+            ?SYS_DEBUG("CC            ~p~n", [hex:to_hexstr(RC_CC_DS)]),
 
             ToCrypt = <<CNTR/binary, PCNTR:8, RC_CC_DS/binary, Data/binary>>,
             DataToSend = crypt_data(analyze_kic(KIC), SP, ToCrypt),
-            ?SYS_DEBUG("DATA   ~p~n", [hex:to_hexstr(DataToSend)]),
+            ?SYS_DEBUG("DATA          ~p~n", [hex:to_hexstr(DataToSend)]),
             {data, << CPL:16, CHL:8, ConstPart/binary, DataToSend/binary >>}
     end.
 
@@ -133,23 +132,9 @@ get_sim_profile() ->
 %% @spec calculate_cc(Key1::Binary, Key2::Binary, Data::Binary) -> Binary
 %% @end
 %%--------------------------------------------------------------------
-
 calculate_cc(Key1, Key2, Data) ->
-    [Block| Rest] = ucp_utils:binary_split(Data, 8),
-    IVec = <<16#00,16#00,16#00,16#00,16#00,16#00,16#00,16#00>>,
-    Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, IVec, Block),
-    [ NextBlock | RestBlocks ] = Rest,
-    calculate_cc(Key1, Key2, Res, NextBlock, RestBlocks).
-
-calculate_cc(Key1, Key2, LastBlock, Block, []) ->
-    Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, LastBlock, Block),
-    ?SYS_DEBUG("CHECKSUM      ~p~n",[hex:to_hexstr(Res)]),
-    Res;
-
-calculate_cc(Key1, Key2, LastBlock, Block, Rest) ->
-    Res =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, LastBlock, Block),
-    [ NextBlock | RestBlocks ] = Rest,
-    calculate_cc(Key1, Key2, Res, NextBlock, RestBlocks).
+    Bin =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, ?ZERO_IV, Data),
+    erlang:binary_part(Bin, {byte_size(Bin), -8}).
 
 %%--------------------------------------------------------------------
 %% @private
@@ -165,6 +150,22 @@ calculate_cntr(cntr, Val)->
 calculate_cntr(nocntr, _Val) ->
     <<>>.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Function returns Padding Counter
+%%
+%% @spec prepare_cntr(SizeDataToCrypt::integer()) -> integer()
+%% @end
+%%--------------------------------------------------------------------
+
+prepare_pcntr(SizeDataToCrypt) ->
+    case SizeDataToCrypt rem 8 of
+        0 ->
+            0;
+        _ ->
+            8-(SizeDataToCrypt rem 8)
+    end.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -272,6 +273,17 @@ analyze_kic(<<_KeyIdx:4, Type:2, _Inf:2>>) ->
             reserved
     end.
 
+%%--------------------------------------------------------------------
+%% @private
+%% @doc
+%% Function returns defined crypto algorithm in KID field
+%%
+%% @spec analyze_kid(KIC::Binary) -> Algo::Atom
+%% @end
+%%--------------------------------------------------------------------
+
+analyze_kid(KID) ->
+    analyze_kic(KID).
 
 %%--------------------------------------------------------------------
 %% @private
