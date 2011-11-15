@@ -539,7 +539,7 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     Recipient = Body#ucp_cmd_5x.adc,
     Data = Body#ucp_cmd_5x.msg,
     Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
-    gen_event:notify(ucp_event, {ucp_5x, {Recipient, Sender, Data}}),
+    gen_event:notify(ucp_event, {sms, {Recipient, Sender, Data}}),
     {ok, State};
 
 process_message({Header = #ucp_header{ot = "53", o_r = "O"}, Body}, State) ->
