@@ -52,7 +52,7 @@ split_message(Message, XSer, CNTR) when is_binary(Message) ->
                          0 -> XSer;
                          _ ->
                             {ok, Service1} = udh_to_service(UDH),
-                            {ok, NewXSer} = services_to_xser([Service1]),
+                            {ok, NewXSer} = services_to_xser([Service1 | proplists:delete(1, Services)]),
                             NewXSer
                       end,
             {result, [{ModXSer, Message}]}
@@ -95,10 +95,10 @@ do_splitting([], _, Result) ->
     {ok, lists:reverse(Result)};
 do_splitting(Message, UDH, []) ->
     % Handle first part
-    UDHL = get_udh_size(UDH),
-    case ((size(Message) + UDHL + ?UDH_CONCAT_IE_SIZE) > ?BIN_BODY_MAX_SIZE) of
+    UDHL = get_udh_size(UDH, ?UDH_CONCAT_IE_SIZE),
+    case ((size(Message) + UDHL) > ?BIN_BODY_MAX_SIZE) of
         true ->
-            MaxSize = ?BIN_BODY_MAX_SIZE - UDHL - ?UDH_CONCAT_IE_SIZE,
+            MaxSize = ?BIN_BODY_MAX_SIZE - UDHL,
             <<Part:MaxSize/binary, Rest/binary>> = Message,
             % HACK: remove STK header if exists (70)
             ModUDH = proplists:delete(?STK_IE, UDH),
@@ -108,10 +108,10 @@ do_splitting(Message, UDH, []) ->
     end;
 do_splitting(Message, UDH, Result) ->
     % Handle following parts
-    UDHL = get_udh_size(UDH), % +1 for UDHL field
-    case ((size(Message) + UDHL + ?UDH_CONCAT_IE_SIZE) > ?BIN_BODY_MAX_SIZE) of
+    UDHL = get_udh_size(UDH, ?UDH_CONCAT_IE_SIZE),
+    case ((size(Message) + UDHL) > ?BIN_BODY_MAX_SIZE) of
         true ->
-            MaxSize = ?BIN_BODY_MAX_SIZE - UDHL - ?UDH_CONCAT_IE_SIZE,
+            MaxSize = ?BIN_BODY_MAX_SIZE - UDHL,
             <<Part:MaxSize/binary, Rest/binary>> = Message,
             do_splitting(Rest, UDH, [Part | Result]);
         _ ->
@@ -133,7 +133,8 @@ xser_to_services([Type, Len | Tail], Acc) ->
     xser_to_services(Rest, [{Type, {service, {Type, Len, Data}}} | Acc]).
 
 services_to_xser(L) ->
-    services_to_xser(L, []).
+    Sorted = lists:reverse(lists:keysort(1, L)),
+    services_to_xser(Sorted, []).
 
 services_to_xser([], Result) ->
     {ok, lists:flatten(hex:to_hexstr(Result))};
@@ -158,7 +159,8 @@ service_to_udh([IEI, IEILen | Tail], Acc) ->
 udh_to_service([]) ->
     {ok, []};
 udh_to_service(L) ->
-    udh_to_service(L, []).
+    Sorted = lists:reverse(lists:keysort(1, L)),
+    udh_to_service(Sorted, []).
 
 udh_to_service([], Result) ->
     Data = lists:flatten(Result),
