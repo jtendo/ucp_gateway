@@ -151,7 +151,7 @@ calculate_cc(Key1, Key2, Data) ->
 calculate_cntr(cntr, Val)->
     <<Val:40>>;
 calculate_cntr(nocntr, _Val) ->
-    <<>>.
+    <<0:40>>.
 
 %%--------------------------------------------------------------------
 %% @private
