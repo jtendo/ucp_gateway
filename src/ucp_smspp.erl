@@ -21,6 +21,7 @@
 %% after GSM 03.48
 %% @end
 %%--------------------------------------------------------------------
+%% FIXME - dummy as long as there's no profile database
 create_tpud(CNTR_VAL, Data) when is_binary(Data),
                                  is_integer(CNTR_VAL) ->
     SP = get_sim_profile(),
