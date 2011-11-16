@@ -1,6 +1,7 @@
 -module(ucp_messages).
 -author('rafal.galczynski@jtendo.com').
 -author('andrzej.trawinski@jtendo.com').
+-author('adam.rutkowski@jtendo.com').
 
 -include("ucp_syntax.hrl").
 -include("logger.hrl").
@@ -228,12 +229,8 @@ create_cmd_51_binary(Trn, Sender, Receiver, Message, Options) when is_binary(Mes
               trn = ucp_utils:trn_to_str(Trn),
               o_r = "O",
               ot = "51"},
-    case check_cmd_5x_bin_options(TempBody, Options) of
-        {ok, Body} ->
-            {ok, ucp_utils:compose_message(Header, Body)};
-        Error ->
-            Error
-    end.
+    {ok, Body} = check_cmd_5x_bin_options(TempBody, Options),
+    {ok, ucp_utils:compose_message(Header, Body)}.
 
 %% ---------------------------------------------------------------------
 %% Internals
