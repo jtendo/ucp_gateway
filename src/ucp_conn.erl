@@ -45,7 +45,7 @@
 -define(SEND_TIMEOUT, ?CFG(send_timeout, ucp_conf, 1000)).
 -define(RETRY_TIMEOUT, ?CFG(retry_timeout, ucp_conf, 10000)).
 -define(CALL_TIMEOUT, ?CFG(call_timeout, ucp_conf, 3000)).
--define(CONNECTION_TIMEOUT, ?CFG(connection_timeout, 2000)).
+-define(CONNECTION_TIMEOUT, ?CFG(connection_timeout, ucp_conf, 2000)).
 %% Grace period after auth errors:
 -define(GRACEFUL_RETRY_TIMEOUT, ?CFG(graceful_retry_timeout, ucp_conf, 5000)).
 -define(MIN_MESSAGE_TRN, ?CFG(min_message_trn, ucp_conf, 0)).
@@ -385,16 +385,17 @@ connect(State) ->
             case send_auth_message(State#state{socket = Socket}) of
                 {ok, NewState} ->
                     Timer = erlang:start_timer(?AUTH_TIMEOUT, self(), auth_timeout),
-                    {ok, wait_auth_response, NewState#state{auth_timer = Timer}};
+                    Ret = {ok, wait_auth_response, NewState#state{auth_timer = Timer}};
                 {error, Reason} ->
                     report_auth_failure(State, Reason),
-                    {ok, connecting, close_and_retry(State)}
+                    Ret = {ok, connecting, close_and_retry(State)}
             end;
         {error, Reason} ->
             ?SYS_ERROR("SMSC connection ~p failed: ~p", [State#state.name, Reason]),
             NewState = close_and_retry(State),
-            {ok, connecting, NewState}
-    end.
+            Ret = {ok, connecting, NewState}
+    end,
+    Ret.
 
 report_auth_failure(State, Reason) ->
     ?SYS_WARN("SMSC authentication failed on ~s: ~p", [State#state.name, Reason]).
