@@ -9,6 +9,7 @@
 -export([
          create_cmd_31/2,
          create_cmd_51/4,
+         create_cmd_51/5,
          create_cmd_60/3,
          create_ack/1]).
 
