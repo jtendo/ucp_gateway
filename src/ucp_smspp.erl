@@ -11,13 +11,14 @@
          parse_0348packet/1,
          test/1]).
 
+
+-spec create_tpud(CNTR_VAL :: integer(),
+                  Data :: binary()) -> binary().
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Function for creating tpud command packet
 %% after GSM 03.48
-%%
-%% @spec create_tpud_message(SP::Record, TAR::Binary,
-%%                           CNTR_VAL::integer(), Data::Binary) -> {data, Binary}
 %% @end
 %%--------------------------------------------------------------------
 create_tpud(CNTR_VAL, Data) when is_binary(Data),
@@ -28,13 +29,16 @@ create_tpud(CNTR_VAL, Data) when is_binary(Data),
     ?SYS_DEBUG("TAR           ~p~n", [hex:to_hexstr(TAR)]),
     create_tpud(SP, TAR, CNTR_VAL, Data).
 
+
+-spec create_tpud(SP :: #sim_profile{},
+                  TAR :: binary(),
+                  CNTR_VAL :: integer(),
+                  Data :: binary()) -> {data, binary()}.
+
 %%--------------------------------------------------------------------
 %% @doc
 %% Function for creating tpud command packet
 %% after GSM 03.48
-%%
-%% @spec create_tpud_message(SP::Record, TAR::Binary,
-%%                           CNTR_VAL::integer(), Data::Binary) -> {data, Binary}
 %% @end
 %%--------------------------------------------------------------------
 create_tpud(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
@@ -151,16 +155,17 @@ calculate_cntr(cntr, Val)->
 calculate_cntr(nocntr, _Val) ->
     <<0:40>>.
 
+
+-spec prepare_pcntr(SizeDataToCrypt :: integer()) -> integer().
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns Padding Counter
-%%
-%% @spec prepare_cntr(SizeDataToCrypt::integer()) -> integer()
 %% @end
 %%--------------------------------------------------------------------
 
-prepare_pcntr(SizeDataToCrypt) ->
+prepare_pcntr(SizeDataToCrypt) when is_integer(SizeDataToCrypt) ->
     case SizeDataToCrypt rem 8 of
         0 ->
             0;
@@ -209,12 +214,13 @@ analyze_cc(2#10) ->
 analyze_cc(2#11) ->
     {ds, 24}.
 
+
+-spec analyze_cntr(integer()) -> nocntr | cntr.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns defined type of counter
-%%
-%% @spec analyze_counter(integer()) -> Type::Atom
 %% @end
 %%--------------------------------------------------------------------
 
@@ -237,15 +243,13 @@ analyze_enc(2#00) ->
 analyze_enc(2#01) ->
     enc.
 
+-spec analyze_spi(SPI :: binary()) ->
+    {cc, {atom(), integer()}, {cntr, atom()}, {enc, atom()} }.
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns definition of RC/CC/DS, encryption, and counter
-%%
-%% @spec analyze_enc(SPI::Binary) -> {cc, {Atom, integer()},
-%%                                    cntr, Atom,
-%%                                    enc, Atom}
 %% @end
 %%--------------------------------------------------------------------
 
@@ -286,12 +290,14 @@ analyze_kic(<<_KeyIdx:4, Type:2, _Inf:2>>) ->
 analyze_kid(KID) ->
     analyze_kic(KID).
 
+
+-spec crypt_data(Alg :: atom(), SP :: #sim_profile{}, Data :: binary()) ->
+    binary().
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns crypted data using given algo
-%%
-%% @spec crypt_data(algo::Atom, SP::Record, Data::Binary) -> Binary
 %% @end
 %%--------------------------------------------------------------------
 
@@ -309,12 +315,14 @@ crypt_data(des_cbc, SP, Data) ->
     Key1 = SP#sim_profile.kickey,
     crypto:des_cbc_encrypt(Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data)).
 
+
+-spec decrypt_data(Alg :: atom(), SP :: #sim_profile{}, Data :: binary()) ->
+    binary().
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns decrypted data using given algo
-%%
-%% @spec crypt_data(algo::Atom, SP::Record, Data::Binary) -> Binary
 %% @end
 %%--------------------------------------------------------------------
 
@@ -333,13 +341,12 @@ decrypt_data(des_cbc, SP, Data) ->
     crypto:des_cbc_decrypt(Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data)).
 
 
+-spec parse_0348packet(Packet :: binary()) ->
+    {cntr, binary(), data, binary()}.
+
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Function parse 03.48 message, returns CNTR and DATA
-%%
-%% @spec parse_command_packet(Packet::Binary) ->
-%%                           {cntr, CNTR::Binary, data, Data::Binary}
 %% @end
 %%--------------------------------------------------------------------
 
