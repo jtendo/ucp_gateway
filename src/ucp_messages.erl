@@ -192,10 +192,10 @@ check_cmd_5x_options(Rec, [{validity_period, Value}|T]) % DDMMYYHHmm
 check_cmd_5x_options(Rec, [{deferred_delivery_time, Value}|T]) % DDMMYYHHmm
   when is_list(Value); length(Value) =:= 10 ->
     check_cmd_5x_options(Rec#ucp_cmd_5x{dd = "1", ddt = Value}, T);
-check_cmd_5x_options(Rec, [_H|T]) ->
-    % TODO: return error
-    % Option unknown or incorrect value: ~w", [H]).
-    check_cmd_5x_options(Rec, T).
+check_cmd_5x_options(Rec, [H|T]) ->
+    ?SYS_WARN("Unknown option: ~p", [H]),
+    {error, unknown_option}.
+    %check_cmd_5x_options(Rec, T).
 
 %%--------------------------------------------------------------------
 %% Function try to create UCP 60 Message Login
