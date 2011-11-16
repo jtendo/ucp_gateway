@@ -74,7 +74,7 @@ create_tpud(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
 
             DataToSend = <<CNTR/binary, PCNTR/binary, Data/binary>>,
             ?SYS_DEBUG("DATA          ~p~n", [hex:to_hexstr(DataToSend)]),
-            {data, << CPL:16, CHL:8, ConstPart/binary, DataToSend/binary >>};
+            Ret = << CPL:16, CHL:8, ConstPart/binary, DataToSend/binary >>;
         enc ->
             SizeOfDataToCrypt = size(Data) + size(CNTR) + CC_SIZE + 1, %% +1 for PCNTR
 
@@ -94,8 +94,9 @@ create_tpud(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
             ToCrypt = <<CNTR/binary, PCNTR:8, RC_CC_DS/binary, Data/binary>>,
             DataToSend = crypt_data(analyze_kic(KIC), SP, ToCrypt),
             ?SYS_DEBUG("DATA          ~p~n", [hex:to_hexstr(DataToSend)]),
-            {data, << CPL:16, CHL:8, ConstPart/binary, DataToSend/binary >>}
-    end.
+            Ret = << CPL:16, CHL:8, ConstPart/binary, DataToSend/binary >>
+    end,
+    {data, Ret}.
 
 
 test(String) ->
@@ -141,7 +142,7 @@ calculate_cc(Key1, Key2, Data) ->
     Bin =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, ?ZERO_IV, Data),
     erlang:binary_part(Bin, {byte_size(Bin), -8}).
 
--spec calculate_cntr(cntr | nocntr, Val :: binary()) -> binary().
+-spec calculate_cntr(cntr | nocntr, Val :: integer()) -> binary().
 
 %%--------------------------------------------------------------------
 %% @private
@@ -246,7 +247,7 @@ analyze_enc(2#01) ->
     enc.
 
 -spec analyze_spi(SPI :: binary()) ->
-    {cc, {atom(), integer()}, {cntr, atom()}, {enc, atom()} }.
+    {cc, {atom(), integer()}, cntr, atom(), enc, atom() }.
 
 %%--------------------------------------------------------------------
 %% @private
