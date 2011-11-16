@@ -128,25 +128,25 @@ get_sim_profile() ->
      },
     SP.
 
+-spec calculate_cc(Key1 :: binary(), Key2 :: binary(), Data :: binary()) ->
+    binary().
 
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function for calculating Cryptographic Checksum
-%%
-%% @spec calculate_cc(Key1::Binary, Key2::Binary, Data::Binary) -> Binary
 %% @end
 %%--------------------------------------------------------------------
 calculate_cc(Key1, Key2, Data) ->
     Bin =  crypto:des3_cbc_encrypt(Key1, Key2, Key1, ?ZERO_IV, Data),
     erlang:binary_part(Bin, {byte_size(Bin), -8}).
 
+-spec calculate_cntr(cntr | nocntr, Val :: binary()) -> binary().
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returs valid Counter binary
-%%
-%% @spec calculate_cntr(Counter_Type::Atom, Val::Binary) -> Binary
 %% @end
 %%--------------------------------------------------------------------
 
@@ -173,12 +173,13 @@ prepare_pcntr(SizeDataToCrypt) when is_integer(SizeDataToCrypt) ->
             8-(SizeDataToCrypt rem 8)
     end.
 
+-spec prepare_cc(nocc | rc | ds, SP :: #sim_profile{}, Data :: binary()) ->
+    binary().
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns CryptographicChecsum/RedundancyCheck/DigitalSignature
-%%
-%% @spec prepare_cc(CC_Type::Atom, SP::Record, Data::Binary) -> Binary
 %% @end
 %%--------------------------------------------------------------------
 
@@ -196,12 +197,13 @@ prepare_cc(cc, SP, Data) ->
 prepare_cc(ds, _SP, _Data) ->
     <<>>.
 
+
+-spec analyze_cc(integer()) -> {Type :: atom(), BitSize :: integer()}.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns defined type of RC/CC/DS
-%%
-%% @spec analyze_cc(integer()) -> {Type::Atom, BitSize::integer()}
 %% @end
 %%--------------------------------------------------------------------
 
@@ -229,12 +231,12 @@ analyze_cntr(2#00) ->
 analyze_cntr(_) ->
     cntr.
 
+-spec analyze_enc(integer()) -> enc | noenc.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns definition of encryption
-%%
-%% @spec analyze_enc(integer()) -> Type::Atom
 %% @end
 %%--------------------------------------------------------------------
 
@@ -257,12 +259,13 @@ analyze_spi(<<0:3, CNTR:2, ENC:1, CC:2, _:8>>) ->
     {cc, analyze_cc(CC), cntr, analyze_cntr(CNTR), enc, analyze_enc(ENC)}.
 
 
+-spec analyze_kic(KIC :: binary()) ->
+        des_cbc | tripledes2key | tripledes3key | reserved.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns defined crypto algorithm in KIC field
-%%
-%% @spec analyze_kic(KIC::Binary) -> Algo::Atom
 %% @end
 %%--------------------------------------------------------------------
 
@@ -278,12 +281,13 @@ analyze_kic(<<_KeyIdx:4, Type:2, _Inf:2>>) ->
             reserved
     end.
 
+-spec analyze_kid(KID :: binary()) ->
+        des_cbc | tripledes2key | tripledes3key | reserved.
+
 %%--------------------------------------------------------------------
 %% @private
 %% @doc
 %% Function returns defined crypto algorithm in KID field
-%%
-%% @spec analyze_kid(KIC::Binary) -> Algo::Atom
 %% @end
 %%--------------------------------------------------------------------
 
