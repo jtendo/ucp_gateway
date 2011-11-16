@@ -409,7 +409,7 @@ send_auth_message(State) ->
 
 % {ok, newstate} lub {error, message}
 process_event({send_message, {Receiver, Message, Opts}} = Event, From, State) ->
-    {ok, Msgs, UpdatedTRN} =
+    {ok, {Msgs, UpdatedTRN}} =
     ucp_messages:create_cmd_51(State#state.trn,
                                State#state.default_originator,
                                Receiver,
