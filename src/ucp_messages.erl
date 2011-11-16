@@ -38,14 +38,11 @@ create_cmd_51(TRN, Sender, Receiver, Message, Options) when is_binary(Message) -
               oadc = UCPSender,
               adc = Receiver,
               otoa = OTOA,
-              nrq = "1",
-              nt = "3",
-              npid = "0539",
               rpid = "0127",
               mcls = "2", %% class message 2
               mt = "4",
               pr = "0"},
-    case check_cmd_5x_bin_options(TempBody, Options) of
+    case check_cmd_5x_options(TempBody, Options) of
         {ok, Body} ->
             check_cmd_5x_splitting(TRN, Body, Message, Options);
         Error ->
@@ -60,7 +57,6 @@ check_cmd_5x_splitting(TRN, Body, Message, Options) ->
     % Check spitting option
     case proplists:get_value(split, Options, false) of
         true ->
-            %{XSer, Message}
             {result, MsgRec} = split_message(Message, Body#ucp_cmd_5x.xser, TRN),
             process_cmd_51_parts(TRN, Body, MsgRec);
         _ ->
@@ -164,24 +160,15 @@ create_cmd_51_normal(TRN, Sender, Receiver, Message, Options) ->
 %% Function checks ucp_cmd_5x options
 %%--------------------------------------------------------------------
 
-% 5x binary message specific options handling
-check_cmd_5x_bin_options(Rec, Options) ->
-    check_cmd_5x_bin_options(Rec, Options, Options).
-
-check_cmd_5x_bin_options(Rec, [], Options) ->
-   check_cmd_5x_options(Rec, Options);
-check_cmd_5x_bin_options(Rec, [_H|T], Options) ->
-   % Option unknown or incorrect value: ~w", [H]).
-   check_cmd_5x_bin_options(Rec, T, Options).
-
 % 5x messages common options handling
 check_cmd_5x_options(Rec, []) ->
     {ok, Rec};
 check_cmd_5x_options(Rec, [{notification_request, Bool}|T])
   when Bool == true ->
-    check_cmd_5x_options(Rec#ucp_cmd_5x{nrq = "1"}, T);
+    check_cmd_5x_options(Rec#ucp_cmd_5x{nrq = "1", npid = "0539", nt = "3"}, T);
 check_cmd_5x_options(Rec, [{notification_type, Type}|T])
   when is_integer(Type); Type =< 0; Type =< 7 ->
+    % TODO: fix NT override when notification_request option used after
     check_cmd_5x_options(Rec#ucp_cmd_5x{nt = integer_to_list(Type)}, T);
 check_cmd_5x_options(Rec, [{extra_services, Value}|T])
    when is_list(Value) ->
@@ -193,9 +180,8 @@ check_cmd_5x_options(Rec, [{deferred_delivery_time, Value}|T]) % DDMMYYHHmm
   when is_list(Value); length(Value) =:= 10 ->
     check_cmd_5x_options(Rec#ucp_cmd_5x{dd = "1", ddt = Value}, T);
 check_cmd_5x_options(Rec, [_H|T]) ->
-    %?SYS_WARN("Unknown option: ~p", [H]),
-    %{error, unknown_option}.
-    check_cmd_5x_options(Rec, T).
+    ?SYS_WARN("Unknown option or value: ~p", [H]),
+    {error, unknown_option}.
 
 %%--------------------------------------------------------------------
 %% Function try to create UCP 60 Message Login
