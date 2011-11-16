@@ -348,7 +348,7 @@ decrypt_data(des_cbc, SP, Data) ->
 
 
 -spec parse_0348packet(Packet :: binary() | list()) ->
-    {cntr, binary(), data, binary()}.
+    {cntr, integer(), data, binary()}.
 
 %%--------------------------------------------------------------------
 %% @doc
