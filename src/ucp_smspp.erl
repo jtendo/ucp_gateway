@@ -13,7 +13,7 @@
 
 
 -spec create_tpud(CNTR_VAL :: integer(),
-                  Data :: binary()) -> binary().
+                  Data :: binary()) -> {data, binary()}.
 
 %%--------------------------------------------------------------------
 %% @doc
