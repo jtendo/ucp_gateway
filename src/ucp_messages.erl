@@ -1,6 +1,7 @@
 -module(ucp_messages).
 -author('rafal.galczynski@jtendo.com').
 -author('andrzej.trawinski@jtendo.com').
+-author('adam.rutkowski@jtendo.com').
 
 -include("ucp_syntax.hrl").
 -include("logger.hrl").
