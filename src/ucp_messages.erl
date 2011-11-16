@@ -262,12 +262,8 @@ create_cmd_51_unicode(Trn, Sender, Receiver, Message, Options) ->
               trn = ucp_utils:trn_to_str(Trn),
               o_r = "O",
               ot = "51"},
-    case check_cmd_5x_options(TempBody, Options) of
-        {ok, Body} ->
-            {ok, ucp_utils:compose_message(Header, Body)};
-        Error ->
-            Error
-    end.
+    {ok, Body} = check_cmd_5x_options(TempBody, Options),
+    {ok, ucp_utils:compose_message(Header, Body)}.
 
 %%--------------------------------------------------------------------
 %% Function try to create UCP 51 Message not having utf-8 chars
@@ -287,12 +283,8 @@ create_cmd_51_normal(Trn, Sender, Receiver, Message, Options) ->
               trn = ucp_utils:trn_to_str(Trn),
               o_r = "O",
               ot = "51"},
-    case check_cmd_5x_options(TempBody, Options) of
-        {ok, Body} ->
-            {ok, ucp_utils:compose_message(Header, Body)};
-        Error ->
-            Error
-    end.
+    {ok, Body} = check_cmd_5x_options(TempBody, Options),
+    {ok, ucp_utils:compose_message(Header, Body)}.
 
 %%--------------------------------------------------------------------
 %% Function checks ucp_cmd_5x options
