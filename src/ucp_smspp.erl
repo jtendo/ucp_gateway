@@ -12,7 +12,6 @@
          test/1]).
 
 %%--------------------------------------------------------------------
-%% @public
 %% @doc
 %% Function for creating tpud command packet
 %% after GSM 03.48
@@ -30,7 +29,6 @@ create_tpud(CNTR_VAL, Data) when is_binary(Data),
     create_tpud(SP, TAR, CNTR_VAL, Data).
 
 %%--------------------------------------------------------------------
-%% @public
 %% @doc
 %% Function for creating tpud command packet
 %% after GSM 03.48
