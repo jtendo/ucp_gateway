@@ -41,6 +41,7 @@ create_cmd_51(TRN, Sender, Receiver, Message, Options) when is_binary(Message) -
               rpid = "0127",
               mcls = "2", %% class message 2
               mt = "4",
+              xser = "01030270000201F6",
               pr = "0"},
     case check_cmd_5x_options(TempBody, Options) of
         {ok, Body} ->
@@ -120,9 +121,6 @@ check_cmd_5x_options(Rec, [{notification_type, Type}|T])
   when is_integer(Type); Type =< 0; Type =< 7 ->
     % TODO: fix NT override when notification_request option used after
     check_cmd_5x_options(Rec#ucp_cmd_5x{nt = integer_to_list(Type)}, T);
-check_cmd_5x_options(Rec, [{extra_services, Value}|T])
-   when is_list(Value) ->
-      check_cmd_5x_options(Rec#ucp_cmd_5x{xser = Value}, T);
 check_cmd_5x_options(Rec, [{validity_period, Value}|T]) % DDMMYYHHmm
   when is_list(Value); length(Value) =:= 10 ->
     check_cmd_5x_options(Rec#ucp_cmd_5x{vp = Value}, T);
