@@ -345,7 +345,7 @@ decrypt_data(des_cbc, SP, Data) ->
     crypto:des_cbc_decrypt(Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data)).
 
 
--spec parse_0348packet(Packet :: binary()) ->
+-spec parse_0348packet(Packet :: binary() | list()) ->
     {cntr, binary(), data, binary()}.
 
 %%--------------------------------------------------------------------
