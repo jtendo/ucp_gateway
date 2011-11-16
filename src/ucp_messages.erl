@@ -170,9 +170,6 @@ check_cmd_5x_bin_options(Rec, Options) ->
 
 check_cmd_5x_bin_options(Rec, [], Options) ->
    check_cmd_5x_options(Rec, Options);
-check_cmd_5x_bin_options(Rec, [{extra_services, Value}|T], Options)
-   when is_list(Value) ->
-      check_cmd_5x_bin_options(Rec#ucp_cmd_5x{xser = Value}, T, Options);
 check_cmd_5x_bin_options(Rec, [_H|T], Options) ->
    % Option unknown or incorrect value: ~w", [H]).
    check_cmd_5x_bin_options(Rec, T, Options).
@@ -187,19 +184,18 @@ check_cmd_5x_options(Rec, [{notification_type, Type}|T])
   when is_integer(Type); Type =< 0; Type =< 7 ->
     check_cmd_5x_options(Rec#ucp_cmd_5x{nt = integer_to_list(Type)}, T);
 check_cmd_5x_options(Rec, [{extra_services, Value}|T])
-  when is_binary(Value) ->
-    {ok, HexXser} = binpp:convert(Value),
-    check_cmd_5x_options(Rec#ucp_cmd_5x{xser = lists:flatten(HexXser)}, T);
+   when is_list(Value) ->
+      check_cmd_5x_options(Rec#ucp_cmd_5x{xser = Value}, T);
 check_cmd_5x_options(Rec, [{validity_period, Value}|T]) % DDMMYYHHmm
   when is_list(Value); length(Value) =:= 10 ->
     check_cmd_5x_options(Rec#ucp_cmd_5x{vp = Value}, T);
 check_cmd_5x_options(Rec, [{deferred_delivery_time, Value}|T]) % DDMMYYHHmm
   when is_list(Value); length(Value) =:= 10 ->
     check_cmd_5x_options(Rec#ucp_cmd_5x{dd = "1", ddt = Value}, T);
-check_cmd_5x_options(Rec, [H|T]) ->
-    ?SYS_WARN("Unknown option: ~p", [H]),
-    {error, unknown_option}.
-    %check_cmd_5x_options(Rec, T).
+check_cmd_5x_options(Rec, [_H|T]) ->
+    %?SYS_WARN("Unknown option: ~p", [H]),
+    %{error, unknown_option}.
+    check_cmd_5x_options(Rec, T).
 
 %%--------------------------------------------------------------------
 %% Function try to create UCP 60 Message Login
