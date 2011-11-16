@@ -21,8 +21,8 @@
          %get_status/1,
          get_reverse_config/1,
          get_name/1,
-         send_txt_message/3,
-         send_bin_message/4,
+         send_message/3,
+         send_message/4,
          close/1]).
 
 %% gen_fsm callbacks
@@ -103,11 +103,11 @@ get_reverse_config(Handle) ->
 %%% --------------------------------------------------------------------
 %%% Sending messages
 %%% --------------------------------------------------------------------
-send_txt_message(Handle, Receiver, Message) ->
-    gen_fsm:sync_send_event(Handle, {send_txt_message, {Receiver, Message}}, ?CALL_TIMEOUT).
+send_message(Handle, Receiver, Message) ->
+    send_message(Handle, Receiver, Message, []).
 
-send_bin_message(Handle, Receiver, Message, Opts) ->
-    gen_fsm:sync_send_event(Handle, {send_bin_message, {Receiver, Message, Opts}}, ?CALL_TIMEOUT).
+send_message(Handle, Receiver, Message, Opts) ->
+    gen_fsm:sync_send_event(Handle, {send_message, {Receiver, Message, Opts}}, ?CALL_TIMEOUT).
 
 %%% --------------------------------------------------------------------
 %%% Shutdown connection (and process) asynchronous.
@@ -268,12 +268,11 @@ handle_info({timeout, _Timer, auth_timeout}, wait_auth_response, State) ->
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
     ?SYS_WARN("keepalive timeout!!", []),
-    TRN = ucp_utils:get_next_trn(State#state.trn),
-    {ok, Message} = ucp_messages:create_cmd_31(TRN, State#state.login),
+    {ok, {[{_, Message}], UpdatedTRN}} = ucp_messages:create_cmd_31(State#state.trn, State#state.login),
     ?SYS_INFO("Sending keep-alive message: ~p", [Message]),
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)),
     Timer = erlang:start_timer(State#state.keepalive_interval, self(), keepalive_timeout),
-    {next_state, active, State#state{keepalive_timer = Timer, trn = TRN}};
+    {next_state, active, State#state{keepalive_timer = Timer, trn = UpdatedTRN}};
 
 %%--------------------------------------------------------------------
 %% Cancel keepalive timer when not in active state
@@ -400,38 +399,38 @@ report_auth_failure(State, Reason) ->
     ?SYS_WARN("SMSC authentication failed on ~s: ~p", [State#state.name, Reason]).
 
 send_auth_message(State) ->
-    TRN = ucp_utils:get_next_trn(State#state.trn),
-    {ok, Message} = ucp_messages:create_cmd_60(TRN, State#state.login, State#state.pass),
+    {ok, {[{_, Message}], UpdatedTRN}} = ucp_messages:create_cmd_60(State#state.trn, State#state.login, State#state.pass),
     ?SYS_DEBUG("Sending auth message: ~p", [Message]),
     case gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)) of
-        ok -> {ok, State#state{trn = TRN}};
+        ok -> {ok, State#state{trn = UpdatedTRN}};
         Error -> Error
     end.
 
 % {ok, newstate} lub {error, message}
-process_event(Event, From, State) ->
-    {ok, Message, NewState} = generate_message(Event, State),
-    send_message(Event, From, Message, NewState).
+process_event({send_message, {Receiver, Message, Opts}} = Event, From, State) ->
+    {ok, Msgs, UpdatedTRN} =
+    ucp_messages:create_cmd_51(State#state.trn,
+                               State#state.default_originator,
+                               Receiver,
+                               Message,
+                               Opts),
+    send_messages(Event, From, Msgs, State#state{trn = UpdatedTRN});
 
-send_message(Event, From, {TRN, Message}, State) ->
+process_event(Event, _From, State) ->
+    ?SYS_WARN("Unknown event: ~p", [Event]),
+    {ok, State}.
+
+send_messages(_Event, _From, [], State) ->
+    {ok, State};
+send_messages(Event, From, [{TRN, Message}|Rest], State) ->
     ?SYS_DEBUG("Sending message: ~p", [Message]),
     case gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)) of
         ok ->
             Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, TRN}),
             NewDict = dict:store(TRN, [{Timer, Event, From}], State#state.dict),
-            {ok, State#state{dict = NewDict}};
+            send_messages(Event, From, Rest, State#state{dict = NewDict});
         Error -> Error
    end.
-
-generate_message({send_txt_message, {Receiver, Message}}, State) ->
-    TRN = ucp_utils:get_next_trn(State#state.trn),
-    {ok, Msg} = ucp_messages:create_cmd_51_text(TRN, State#state.default_originator, Receiver, Message),
-    {ok, {TRN, Msg}, State#state{trn = TRN}};
-
-generate_message({send_bin_message, {Receiver, Message, Opts}}, State) ->
-    TRN = ucp_utils:get_next_trn(State#state.trn),
-    {ok, Msg} = ucp_messages:create_cmd_51_binary(TRN, State#state.default_originator, Receiver, Message, Opts),
-    {ok, {TRN, Msg}, State#state{trn = TRN}}.
 
 cancel_timer(undefined) ->
     ok;
