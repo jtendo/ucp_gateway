@@ -364,8 +364,8 @@ parse_0348packet(Packet) when is_binary(Packet)->
     SP = get_sim_profile(),
     parse_0348packet(SP, Packet).
 
-parse_0348packet(SP, Packet) when is_list(Packet)->
-    parse_0348packet(SP, hex:hexstr_to_bin(Packet));
+%parse_0348packet(SP, Packet) when is_list(Packet)->
+%    parse_0348packet(SP, hex:hexstr_to_bin(Packet));
 
 parse_0348packet(SP, Packet) when is_binary(Packet)->
     <<CPI:8, CPL:8, CHL:8, SPIA:8, SPIB:8, KIC:8, KID:8, TAR:24, Rest/binary>> = Packet,
