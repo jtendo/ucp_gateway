@@ -267,7 +267,6 @@ handle_info({timeout, _Timer, auth_timeout}, wait_auth_response, State) ->
 %% Handle keep-alive timer timeout = send keep-alive message to SMSC
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
-    ?SYS_WARN("keepalive timeout!!", []),
     {ok, {[{_, Message}], UpdatedTRN}} = ucp_messages:create_cmd_31(State#state.trn, State#state.login),
     ?SYS_INFO("Sending keep-alive message: ~p", [Message]),
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)),
@@ -353,7 +352,6 @@ apply_transition_callback(Transition, Pid, State) when is_pid(Pid) ->
 %%% Internal functions
 %%%===================================================================
 dequeue_messages(State) ->
-    ?SYS_DEBUG("Dequeing messages...", []),
     case queue:out(State#state.req_q) of
         {{value, {Event, From}}, Q} ->
             case process_message(Event, From, State#state{req_q=Q}) of
