@@ -41,7 +41,7 @@ create_cmd_51(TRN, Sender, Receiver, Message, Options) when is_binary(Message) -
               rpid = "0127",
               mcls = "2", %% class message 2
               mt = "4",
-              xser = "01030270000201F6",
+              xser = "01030270000201F60D0101",
               pr = "0"},
     case check_cmd_5x_options(TempBody, Options) of
         {ok, Body} ->
@@ -95,7 +95,7 @@ process_cmd_51_parts(TRN, Body, [{XSer, Message}|Rest], Result) ->
 form_cmd_51(TRN, Body, XSer, Message) ->
     UCPMsg = lists:flatten(hex:to_hexstr(Message)),
     NB = case Body#ucp_cmd_5x.mt of
-                4 -> integer_to_list(length(UCPMsg) * 4);
+                "4" -> integer_to_list(length(UCPMsg) * 4);
                 _ -> []
          end,
     UpdatedBody = Body#ucp_cmd_5x{
