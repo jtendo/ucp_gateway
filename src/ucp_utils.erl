@@ -176,7 +176,7 @@ pad_to(Width, Binary) ->
 %%--------------------------------------------------------------------
 get_next_trn(Val) when is_list(Val) ->
     get_next_trn(list_to_integer(Val));
-get_next_trn(Val) when is_integer(Val) andalso Val > ?MAX_MESSAGE_TRN ->
+get_next_trn(Val) when is_integer(Val) andalso Val >= ?MAX_MESSAGE_TRN ->
     ?MIN_MESSAGE_TRN;
 get_next_trn(Val) when is_integer(Val) ->
     Val + 1.
