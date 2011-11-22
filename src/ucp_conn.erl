@@ -24,7 +24,8 @@
          queue_message/3,
          send_message/3,
          send_message/4,
-         close/1]).
+         close/1,
+         get_request_id/0]).
 
 %% gen_fsm callbacks
 -export([init/1,
@@ -67,7 +68,7 @@
           socket,   %% smsc socket
           auth_timer, %% ref to auth timeout
           last_usage, %% timestamp of last socket usage
-          trn = 98,   %% message sequence number
+          trn = 0,   %% message sequence number
           cntr = 500, %% smspp message counter
           reply_timeout, %% reply time of smsc
           keepalive_interval, %% interval between sending keepalive ucp31 messages
@@ -298,6 +299,7 @@ handle_info({tcp_error, _Socket, Reason}, StateName, State) ->
 handle_info({timeout, Timer, {cmd_timeout, TRN}}, StateName, State) ->
     ?SYS_DEBUG("Message timed out: ~p", [TRN]),
     case cmd_timeout(Timer, TRN, State) of
+        {reply, undefined, _, NewS} -> {next_state, StateName, NewS};
         {reply, To, Reason, NewS} -> gen_fsm:reply(To, Reason),
                                      {next_state, StateName, NewS};
         {error, _Reason}           -> {next_state, StateName, State}
@@ -409,7 +411,7 @@ dequeue_messages(State) ->
             ?SYS_DEBUG("Dequeueing...", []),
             case queue:out(State#state.req_q) of
                 {{value, {Event, From}}, Q} ->
-                    case process_message(Event, From, State#state{req_q=Q}) of
+                    case process_message(Event, From, State#state{req_q = Q}) of
                         {_, active, NewState} ->
                             dequeue_messages(NewState);
                         Res ->
@@ -609,15 +611,20 @@ process_message({#ucp_header{ot = "31", o_r = "R"}, _Body}, State) ->
 
 process_message({#ucp_header{ot = "51", o_r = "R", trn = TRN}, Body}, State) ->
     IntTRN = erlang:list_to_integer(TRN),
-    {Timer, _Event, From} = get_msg_rec(IntTRN, State#state.dict),
-    cancel_timer(Timer),
-    NewDict = dict:erase(IntTRN, State#state.dict),
-    NewState = update_sending_counter(-1, State#state{dict = NewDict}),
-    case From of
-        undefined -> {ok, NewState};
-        _ ->
-            Reply = check_result(Body),
-            {reply, Reply, From, NewState}
+    case get_msg_rec(IntTRN, State#state.dict) of
+        {Timer, _Event, From} ->
+            cancel_timer(Timer),
+            NewDict = dict:erase(IntTRN, State#state.dict),
+            NewState = update_sending_counter(-1, State#state{dict = NewDict}),
+            case From of
+                undefined -> {ok, NewState};
+                _ ->
+                    Reply = check_result(Body),
+                    {reply, Reply, From, NewState}
+            end;
+        {error, unknown_trn} -> % message must have expired earlier = ignore
+            ?SYS_WARN("Unknown TRN: ~s", TRN),
+            {ok, update_sending_counter(-1, State)}
     end;
 
 process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
@@ -673,5 +680,9 @@ get_msg_rec(TRN, Dict) ->
         {ok, [{Timer, Event, From}]} ->
             {Timer, Event, From};
         error ->
-            throw({error, unknown_trn})
+            %throw({error, unknown_trn})
+            {error, unknown_trn}
     end.
+
+get_request_id() ->
+    "SMS." ++ lists:subtract(erlang:ref_to_list(make_ref()), "#Ref<>").
