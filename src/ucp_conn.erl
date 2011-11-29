@@ -8,7 +8,7 @@
 %%% UCP SMSC client state machine.
 %%% Possible states are:
 %%%     connecting - actually disconnected, but retrying periodically
-%%%     wait_auth_response  - connected and sent auth request
+%%%     wait_auth_response  - connected and sent auth message
 %%%     active - bound to SMSC server and ready to handle commands
 %%%     wait_reply - sent command and waiting for reply
 %%%----------------------------------------------------------------------
@@ -66,8 +66,8 @@
           keepalive_timer,       %% keep-alive timer
           default_originator,    %% default sms originator
           dict,                  %% dict holding messages params
-          req_q,                 %% queue for requests
-          sending_window_size,   %% max number of request that can be sent to smsc
+          msg_q,                 %% queue for messages
+          sending_window_size,   %% max number of messages that can be sent to smsc
                                  %% without waiting for acknowledge
           messages_unconfirmed,  %% number of messages waiting for acknowledge
           transition_callback    %% function called when fsm changes state
@@ -131,7 +131,7 @@ init([Name, {Host, Port, Login, Password}]) ->
                     default_originator = proplists:get_value(default_originator,
                         SMSConnConfig, "orange.pl"),
                     dict = dict:new(),
-                    req_q = queue:new(),
+                    msg_q = queue:new(),
                     transition_callback =
                         proplists:get_value(transition_callback, SMSConnConfig),
                     sending_window_size =
@@ -254,9 +254,9 @@ handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
     ?SYS_INFO("Idle connection. Sending keep-alive message", []),
     Body = ucp_messages:create_cmd_31_body(State#state.login),
     Id = get_message_id("KAM"),
-    NQ = queue:in({Id, Body}, State#state.req_q),
+    NQ = queue:in({Id, Body}, State#state.msg_q),
     gen_fsm:send_all_state_event(self(), dequeue),
-    {next_state, active, State#state{req_q = NQ}};
+    {next_state, active, State#state{msg_q = NQ}};
 
 %%--------------------------------------------------------------------
 %% Cancel keepalive timer when not in active state
@@ -346,13 +346,13 @@ enqueue_event({send_message, {Receiver, Message, Opts}}, From, State, Notify) ->
                                    Receiver,
                                    Message,
                                    Opts),
-    {ok, Q, Ids} = enqueue_message(Msgs, State#state.req_q),
+    {ok, Q, Ids} = enqueue_message(Msgs, State#state.msg_q),
     gen_fsm:reply(From, {ok, Ids}),
     case Notify of
         true -> gen_fsm:send_all_state_event(self(), dequeue);
         _ -> ok
     end,
-    {ok, State#state{req_q = Q, cref = UpdatedCRef}};
+    {ok, State#state{msg_q = Q, cref = UpdatedCRef}};
 enqueue_event(Event, From, State, _Notify) ->
     ?SYS_WARN("Unknown event received from ~p: ~p", [From, Event]),
     {ok, State}.
@@ -375,11 +375,11 @@ dequeue_message(State) ->
     case is_sending_allowed(State) of
         true ->
             ?SYS_DEBUG("Dequeueing...", []),
-            case queue:out(State#state.req_q) of
+            case queue:out(State#state.msg_q) of
                 {{value, Message}, Q} ->
                     ?SYS_INFO("Canceling keepalive timer", []),
                     cancel_timer(State#state.keepalive_timer),
-                    case process_queued_message(Message, State#state{req_q = Q}) of
+                    case process_queued_message(Message, State#state{msg_q = Q}) of
                         {_, active, NewState} ->
                             dequeue_message(NewState);
                         Res ->
@@ -403,8 +403,8 @@ process_queued_message({Id, Body}, State) ->
         {ok, NewState} ->
             {next_state, get_next_state(NewState), NewState};
         {error, _Reason} ->
-            Q = queue:in_r({Id, Body}, State#state.req_q),
-            NewState = close_and_retry(State#state{req_q = Q}),
+            Q = queue:in_r({Id, Body}, State#state.msg_q),
+            NewState = close_and_retry(State#state{msg_q = Q}),
             {next_state, connecting, NewState}
     end.
 
@@ -483,9 +483,9 @@ close_and_retry(State, Timeout) ->
                       {queue:in_r({Id, Msg}, Q), C - 1};
                  (_, _, V) ->
                       V
-              end, {State#state.req_q, State#state.messages_unconfirmed}, State#state.dict),
+              end, {State#state.msg_q, State#state.messages_unconfirmed}, State#state.dict),
     erlang:send_after(Timeout, self(), {timeout, retry_connect}),
-    State#state{socket = null, req_q = Queue, dict = dict:new(), messages_unconfirmed = UnconfirmedNo}.
+    State#state{socket = null, msg_q = Queue, dict = dict:new(), messages_unconfirmed = UnconfirmedNo}.
 
 %%-----------------------------------------------------------------------
 %% Deals with incoming messages
