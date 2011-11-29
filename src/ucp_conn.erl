@@ -164,8 +164,8 @@ active(Event, From, State) ->
     ?SYS_DEBUG("State: ~p", [NewState]),
     {next_state, active, NewState}.
 
-handle_event(dequeue, StateName, State) ->
-    ?SYS_INFO("Handling dequeue event in state: ~p", [StateName]),
+handle_event(dequeue, active, State) ->
+    ?SYS_INFO("Handling dequeue event in active state", []),
     dequeue_message(State);
 
 handle_event(close, _StateName, State) ->
@@ -198,11 +198,12 @@ handle_info({tcp, _Socket, RawData}, connecting, State) ->
 
 handle_info({tcp, _Socket, RawData}, StateName, State) ->
     ?SYS_DEBUG("TCP packet received in ~p state: ~p", [StateName, RawData]),
+    %NewState = alter_keepalive_timer(StateName, State),
     case catch handle_received_data(RawData, State) of
         {ok, NewState} ->
             % process queued messages
             gen_fsm:send_all_state_event(self(), dequeue),
-            {next_state, StateName, NewState};
+            {next_state, get_next_state(NewState), NewState};
         {auth_ok, NewState} ->
             % process queued messages
             gen_fsm:send_all_state_event(self(), dequeue),
@@ -389,15 +390,17 @@ process_queued_message({Id, Body}, State) ->
     ?SYS_INFO("Processing message (~s)", [Id]),
     case post_message(Id, Body, State) of
         {ok, NewState} ->
-            StateName = case is_sending_allowed(NewState) of
-                true -> active;
-                false -> wait_response
-            end,
-            {next_state, StateName, NewState};
+            {next_state, get_next_state(NewState), NewState};
         {error, _Reason} ->
             Q = queue:in_r({Id, Body}, State#state.req_q),
             NewState = close_and_retry(State#state{req_q = Q}),
             {next_state, connecting, NewState}
+    end.
+
+get_next_state(State) ->
+    case is_sending_allowed(State) of
+        true -> active;
+        false -> wait_response
     end.
 
 connect(State) ->
@@ -475,8 +478,7 @@ handle_received_data(Data, State) ->
     case ucp_utils:decode_message(Data) of
         {ok, Message} ->
             ?SYS_DEBUG("Processing received message: ~p", [Message]),
-            NewState = process_confirmations(Message, State),
-            process_message(Message, NewState);
+            process_message(Message, State);
         Error ->
             % Decoding failed = ignore message
             %TODO: Make sure is't OK?
@@ -484,45 +486,48 @@ handle_received_data(Data, State) ->
             Error
     end.
 
-process_confirmations({#ucp_header{o_r = "R", trn = TRN}, _Body}, State) ->
+process_message({#ucp_header{o_r = "R", trn = TRN}, _Body} = Data, State) ->
     % Update counter in state
     NewState = update_sending_counter(-1, State),
     % Cancel timers
     IntTRN = erlang:list_to_integer(TRN),
-    case get_msg_rec(IntTRN, State#state.dict) of
+    case get_msg_rec(IntTRN, NewState#state.dict) of
         {Timer, MsgId, _Msg} ->
-            ?SYS_DEBUG("Message ~s reception acknowledged", [MsgId]),
             cancel_timer(Timer),
-            NewDict = dict:erase(IntTRN, State#state.dict),
-            NewState#state{dict = NewDict};
+            NewDict = dict:erase(IntTRN, NewState#state.dict),
+            process_confirmation(MsgId, Data, NewState#state{dict = NewDict});
         {error, unknown_trn} -> % message must have expired earlier = ignore
             ?SYS_WARN("Unknown TRN: ~s", TRN),
-            NewState
+            process_confirmation(unknown, Data, NewState)
     end;
-process_confirmations(_Message, State) ->
-    State.
+process_message({#ucp_header{o_r = "O"} = Header, _Body} = Data, State) ->
+    {ok, Ack} = ucp_messages:create_ack(Header),
+    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
+    %TODO: Check sending result = Don't know what to do when error!!
+    gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
+    process_reception(Data, State).
 
-process_message({#ucp_header{ot = "31", o_r = "R"}, _Body}, State) ->
+process_confirmation(_MsgId, {#ucp_header{ot = "31"}, _Body}, State) ->
     % just keepalive ack/nack - do nothing
     {ok, State};
 
-process_message({#ucp_header{ot = "51", o_r = "R"}, _Body}, State) ->
+process_confirmation(MsgId, {#ucp_header{ot = "51"}, Body}, State) ->
     % message reception confirmation
+    case Body of
+        #ack{} -> % confirmed
+            ?SYS_DEBUG("Message (~s) reception acknowledged", [MsgId]);
+        #nack{} -> % rejected
+            ?SYS_DEBUG("Message (~s) reception rejected: ~p", [MsgId, Body#nack.sm])
+    end,
     {ok, State};
 
-process_message({#ucp_header{ot = "60", o_r = "R"}, Body}, State) ->
+process_confirmation(_MsgId, {#ucp_header{ot = "60"}, Body}, State) ->
     case Body of
         #ack{} -> {auth_ok, State};
         #nack{} -> {auth_failed, Body#nack.sm, State}
-    end;
+    end.
 
-process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
-    % respond with ACK
-    ?SYS_INFO("Received message: ~p", [Body]),
-    {ok, Ack} = ucp_messages:create_ack(Header),
-    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
-    gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
-    %TODO: Check sending result = Don't know what to do when error!!
+process_reception({#ucp_header{ot = "52"}, Body}, State) ->
     % Ref message
     Recipient = Body#ucp_cmd_5x.adc,
     Data = Body#ucp_cmd_5x.msg,
@@ -530,20 +535,13 @@ process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
     gen_event:notify(ucp_event, {sms, {Recipient, Sender, Data}}),
     {ok, State};
 
-process_message({Header = #ucp_header{ot = "53", o_r = "O"}, Body}, State) ->
-    % respond with ACK
+process_reception({#ucp_header{ot = "53"}, Body}, State) ->
     Info = hex:hexstr_to_list(ucp_utils:from_ira(Body#ucp_cmd_5x.msg)),
     ?SYS_INFO("Received delivery report message: ~p", [Info]),
-    {ok, Ack} = ucp_messages:create_ack(Header),
-    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
-    gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
     {ok, State};
 
-process_message(Message = {Header, _Body}, State) ->
+process_reception(Message, State) ->
     ?SYS_DEBUG("Unhandled message: ~p", [Message]),
-    {ok, Ack} = ucp_messages:create_ack(Header),
-    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
-    gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
     {ok, State}.
 
 get_msg_rec(TRN, Dict) ->
