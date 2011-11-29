@@ -10,6 +10,7 @@
 %%%     connecting - actually disconnected, but retrying periodically
 %%%     wait_auth_response  - connected and sent auth request
 %%%     active - bound to SMSC server and ready to handle commands
+%%%     wait_reply - sent command and waiting for reply
 %%%----------------------------------------------------------------------
 
 -include("ucp_syntax.hrl").
@@ -37,39 +38,39 @@
          terminate/3,
          code_change/4]).
 
+%% gen_fsm2 callback
 -export([handle_state/2]).
 
 -define(SERVER, ?MODULE).
 -define(CMD_TIMEOUT, ?CFG(cmd_timeout, ucp_conf, 3000)).
 -define(SEND_TIMEOUT, ?CFG(send_timeout, ucp_conf, 1000)).
 -define(RETRY_TIMEOUT, ?CFG(retry_timeout, ucp_conf, 10000)).
--define(CALL_TIMEOUT, ?CFG(call_timeout, ucp_conf, 6000)).
+-define(CALL_TIMEOUT, ?CFG(call_timeout, ucp_conf, 3000)).
 -define(CONNECTION_TIMEOUT, ?CFG(connection_timeout, ucp_conf, 2000)).
-%% Grace period after auth errors:
+%% Grace period after auth errors
 -define(GRACEFUL_RETRY_TIMEOUT, ?CFG(graceful_retry_timeout, ucp_conf, 5000)).
 -define(SENDING_WINDOW_SIZE, ?CFG(sending_window_size, ucp_conf, 1)).
-
 -define(TCP_OPTIONS, [binary, {packet, 0}, {active, true}, {reuseaddr, true},
         {keepalive, true}, {send_timeout, ?SEND_TIMEOUT}, {send_timeout_close, false}]).
 
 -record(state, {
-          name,     %% Name of connection
-          host,     %% smsc address
-          port,     %% smsc port
-          login,    %% smsc login
-          pass,     %% smsc password
-          socket,   %% smsc socket
-          trn,   %% message sequence number
-          cref, %% message concatenation reference number
-          reply_timeout, %% reply time of smsc
-          keepalive_interval, %% interval between sending keepalive ucp31 messages
-          keepalive_timer,
-          default_originator, %% default sms originator
-          dict, %% dict holding operation params and results
-          req_q, %% queue for requests
-          sending_window_size,
-          messages_unconfirmed,
-          transition_callback
+          name,                  %% name of connection
+          host,                  %% smsc address
+          port,                  %% smsc port
+          login,                 %% smsc login
+          pass,                  %% smsc password
+          socket,                %% smsc socket
+          trn,                   %% message sequence number
+          cref,                  %% message concatenation reference number
+          keepalive_interval,    %% interval between sending keep-alive messages
+          keepalive_timer,       %% keep-alive timer
+          default_originator,    %% default sms originator
+          dict,                  %% dict holding messages params
+          req_q,                 %% queue for requests
+          sending_window_size,   %% max number of request that can be sent to smsc
+                                 %% without waiting for acknowledge
+          messages_unconfirmed,  %% number of messages waiting for acknowledge
+          transition_callback    %% function called when fsm changes state
          }).
 
 %%%===================================================================
@@ -271,7 +272,6 @@ handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
 handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
     ?SYS_INFO("UCP Connection process ~p (~p) received configuration reload notification", [State#state.name, self()]),
     NewState = State#state{
-        reply_timeout = proplists:get_value(reply_timeout, SMSConnConfig, 20000),
         keepalive_interval = proplists:get_value(keepalive_interval, SMSConnConfig, 62000),
         default_originator = proplists:get_value(default_originator, SMSConnConfig, "orange.pl")
     },
