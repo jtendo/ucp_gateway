@@ -13,10 +13,12 @@
          to_7bit/1,
          encode_sender/1,
          decode_sender/2,
+         create_message/3,
          compose_message/2,
          binary_split/2,
          pad_to/2,
          get_next_trn/1,
+         get_next_ref/1,
          trn_to_str/1,
          decode_message/1,
          wrap/1
@@ -26,6 +28,8 @@
 -define(ETX, 16#03).
 -define(MIN_MESSAGE_TRN, 0).
 -define(MAX_MESSAGE_TRN, 99).
+-define(MIN_MESSAGE_REF, 0).
+-define(MAX_MESSAGE_REF, 255).
 -define(UCP_HEADER_LEN, 13).
 -define(UCP_CHECKSUM_LEN, 2).
 -define(UCP_SEPARATOR, $/).
@@ -84,6 +88,14 @@ decode_sender(OTOA, OAdC) ->
         _Other ->
            OAdC
     end.
+
+create_message(TRN, CmdId, Body) ->
+    NewTRN = get_next_trn(TRN),
+    Header = #ucp_header{
+                  trn = trn_to_str(NewTRN),
+                  o_r = "O",
+                  ot = CmdId},
+    {ok, NewTRN, compose_message(Header, Body)}.
 
 %%--------------------------------------------------------------------
 %% Function for composing whole ucp message
@@ -173,12 +185,23 @@ pad_to(Width, Binary) ->
 
 %%--------------------------------------------------------------------
 %% Increase with rotate TRN number
+%%
 %%--------------------------------------------------------------------
 get_next_trn(Val) when is_list(Val) ->
     get_next_trn(list_to_integer(Val));
 get_next_trn(Val) when is_integer(Val) andalso Val >= ?MAX_MESSAGE_TRN ->
     ?MIN_MESSAGE_TRN;
 get_next_trn(Val) when is_integer(Val) ->
+    Val + 1.
+
+%%--------------------------------------------------------------------
+%% Increase with rotate Ref (Concatenation Reference Number) number
+%%--------------------------------------------------------------------
+get_next_ref(Val) when is_list(Val) ->
+    get_next_ref(list_to_integer(Val));
+get_next_ref(Val) when is_integer(Val) andalso Val >= ?MAX_MESSAGE_REF ->
+    ?MIN_MESSAGE_REF;
+get_next_ref(Val) when is_integer(Val) ->
     Val + 1.
 
 %%--------------------------------------------------------------------
