@@ -155,13 +155,12 @@ wait_auth_response(Event, From, State) ->
 
 wait_response(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in wait_response state: ~p", [From, Event]),
-    {ok, NewState} = enqueue_event(Event, From, State),
+    {ok, NewState} = enqueue_event(Event, From, State, true),
     {next_state, wait_response, NewState}.
 
 active(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in active state: ~p", [From, Event]),
-    {ok, NewState} = enqueue_event(Event, From, State),
-    ?SYS_DEBUG("State: ~p", [NewState]),
+    {ok, NewState} = enqueue_event(Event, From, State, true),
     {next_state, active, NewState}.
 
 handle_event(dequeue, active, State) ->
@@ -198,7 +197,6 @@ handle_info({tcp, _Socket, RawData}, connecting, State) ->
 
 handle_info({tcp, _Socket, RawData}, StateName, State) ->
     ?SYS_DEBUG("TCP packet received in ~p state: ~p", [StateName, RawData]),
-    %NewState = alter_keepalive_timer(StateName, State),
     case catch handle_received_data(RawData, State) of
         {ok, NewState} ->
             % process queued messages
@@ -245,7 +243,6 @@ handle_info({timeout, Timer, {cmd_timeout, TRN}}, StateName, State) ->
     end;
 
 handle_info({timeout, retry_connect}, connecting, State) ->
-    ?SYS_WARN("retry_connect timeout!", []),
     {ok, NextState, NewState} = connect(State),
     {next_state, NextState, NewState};
 
@@ -253,17 +250,18 @@ handle_info({timeout, retry_connect}, connecting, State) ->
 %% Ref keep-alive timer timeout = send keep-alive message to SMSC
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
-    {ok, UpdatedTRN, Message} = ucp_messages:create_cmd_31(State#state.trn, State#state.login),
-    ?SYS_INFO("Sending keep-alive message: ~p", [Message]),
-    gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)),
-    Timer = erlang:start_timer(State#state.keepalive_interval, self(), keepalive_timeout),
-    {next_state, active, State#state{keepalive_timer = Timer, trn = UpdatedTRN}};
+    ?SYS_INFO("Idle connection. Sending keep-alive message", []),
+    Body = ucp_messages:create_cmd_31_body(State#state.login),
+    Id = get_message_id("KAM"),
+    NQ = queue:in({Id, Body}, State#state.req_q),
+    gen_fsm:send_all_state_event(self(), dequeue),
+    {next_state, active, State#state{req_q = NQ}};
 
 %%--------------------------------------------------------------------
 %% Cancel keepalive timer when not in active state
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
-    ?SYS_INFO("Canceling keepalive timer", []),
+    ?SYS_WARN("Canceling keepalive timer in non active state", []),
     cancel_timer(State#state.keepalive_timer),
     {next_state, StateName, State};
 
@@ -338,20 +336,29 @@ apply_transition_callback(Transition, Pid, State) when is_pid(Pid) ->
 %%%===================================================================
 %% Cut message into pieces (if needed) then put them on the queue
 %%%===================================================================
-enqueue_event({send_message, {Receiver, Message, Opts}}, From, State) ->
+enqueue_event(Event, From, State) ->
+    enqueue_event(Event, From, State, false).
+
+enqueue_event({send_message, {Receiver, Message, Opts}}, From, State, Notify) ->
     {ok, UpdatedCRef, Msgs} = ucp_messages:create_cmd_51_body(
                                    State#state.cref,
                                    State#state.default_originator,
                                    Receiver,
                                    Message,
                                    Opts),
-    {ok, Q, Ids} = enqueue_message(Msgs, State#state.req_q, []),
+    {ok, Q, Ids} = enqueue_message(Msgs, State#state.req_q),
     gen_fsm:reply(From, {ok, Ids}),
-    gen_fsm:send_all_state_event(self(), dequeue),
+    case Notify of
+        true -> gen_fsm:send_all_state_event(self(), dequeue);
+        _ -> ok
+    end,
     {ok, State#state{req_q = Q, cref = UpdatedCRef}};
-enqueue_event(Event, From, State) ->
+enqueue_event(Event, From, State, _Notify) ->
     ?SYS_WARN("Unknown event received from ~p: ~p", [From, Event]),
     {ok, State}.
+
+enqueue_message(Msgs, Q) ->
+    enqueue_message(Msgs, Q, []).
 
 enqueue_message([], Q, Ids) ->
     {ok, Q, lists:reverse(Ids)};
@@ -370,6 +377,8 @@ dequeue_message(State) ->
             ?SYS_DEBUG("Dequeueing...", []),
             case queue:out(State#state.req_q) of
                 {{value, Message}, Q} ->
+                    ?SYS_INFO("Canceling keepalive timer", []),
+                    cancel_timer(State#state.keepalive_timer),
                     case process_queued_message(Message, State#state{req_q = Q}) of
                         {_, active, NewState} ->
                             dequeue_message(NewState);
@@ -377,12 +386,14 @@ dequeue_message(State) ->
                             Res
                     end;
                 {empty, _} ->
-                    % TODO: set keepalive timer
-                    {next_state, active, State}
+                    Timer = erlang:start_timer(State#state.keepalive_interval, self(), keepalive_timeout),
+                    ?SYS_INFO("Starting keepalive timer: ~p", [Timer]),
+                    {next_state, active, State#state{keepalive_timer = Timer}}
             end;
        false ->
-            % TODO: disable keepalive timer
             ?SYS_DEBUG("Sending not allowed...", []),
+            ?SYS_INFO("Canceling keepalive timer", []),
+            cancel_timer(State#state.keepalive_timer),
             {next_state, wait_response, State}
     end.
 
@@ -420,19 +431,20 @@ connect(State) ->
                     {ok, connecting, close_and_retry(State)}
             end;
         {error, Reason} ->
-            ?SYS_ERROR("Connection to ~p failed: ~p", [State#state.name, Reason]),
+            ?SYS_ERROR("Error connecting to ~p: ~p", [State#state.name, Reason]),
             NewState = close_and_retry(State),
             {ok, connecting, NewState}
     end.
 
-post_message(MsgId, {cmd_body, CmdId, Body}, State) ->
+post_message(MsgId, {cmd_body, CmdId, Body} = Msg, State) ->
     {ok, UpdatedTRN, Message} = ucp_utils:create_message(State#state.trn, CmdId, Body),
     ?SYS_DEBUG("Sending message (~s): ~p", [MsgId, Message]),
     case gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)) of
         ok ->
             NewState = update_sending_counter(1, State),
             Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, UpdatedTRN}),
-            NewDict = dict:store(UpdatedTRN, [{Timer, MsgId, Body}], NewState#state.dict),
+            ?SYS_INFO("Starting message (~s) timer: ~p", [MsgId, Timer]),
+            NewDict = dict:store(UpdatedTRN, [{Timer, MsgId, Msg}], NewState#state.dict),
             {ok, NewState#state{dict = NewDict, trn = UpdatedTRN}};
         Error -> Error
     end.
@@ -448,28 +460,32 @@ cancel_timer(undefined) ->
     ok;
 cancel_timer(Timer) ->
     Value = erlang:cancel_timer(Timer),
-    ?SYS_DEBUG("Timer ~p canceled with value: ~p", [Timer, Value]),
+    case Value of
+        false -> ok;
+        _ -> ?SYS_DEBUG("Timer ~p canceled with value: ~p", [Timer, Value])
+    end,
     receive
         {timeout, Timer, _} ->
+            ?SYS_DEBUG("Dupa",[]),
             ok
     after 0 ->
             ok
     end.
 
-close_and_retry(State, Timeout) ->
-    catch gen_tcp:close(State#state.socket),
-    Queue = dict:fold(
-              fun(_Id, [{Timer, Id, Msg}|_], Q) ->
-                      cancel_timer(Timer),
-                      queue:in_r({Id, Msg}, Q);
-                 (_, _, Q) ->
-                      Q
-              end, State#state.req_q, State#state.dict),
-    erlang:send_after(Timeout, self(), {timeout, retry_connect}),
-    State#state{socket = null, req_q = Queue, dict = dict:new()}.
-
 close_and_retry(State) ->
     close_and_retry(State, ?RETRY_TIMEOUT).
+
+close_and_retry(State, Timeout) ->
+    catch gen_tcp:close(State#state.socket),
+    {Queue, UnconfirmedNo} = dict:fold(
+              fun(_Id, [{Timer, Id, Msg}|_], {Q, C}) ->
+                      cancel_timer(Timer),
+                      {queue:in_r({Id, Msg}, Q), C - 1};
+                 (_, _, V) ->
+                      V
+              end, {State#state.req_q, State#state.messages_unconfirmed}, State#state.dict),
+    erlang:send_after(Timeout, self(), {timeout, retry_connect}),
+    State#state{socket = null, req_q = Queue, dict = dict:new(), messages_unconfirmed = UnconfirmedNo}.
 
 %%-----------------------------------------------------------------------
 %% Deals with incoming messages
@@ -497,7 +513,7 @@ process_message({#ucp_header{o_r = "R", trn = TRN}, _Body} = Data, State) ->
             NewDict = dict:erase(IntTRN, NewState#state.dict),
             process_confirmation(MsgId, Data, NewState#state{dict = NewDict});
         {error, unknown_trn} -> % message must have expired earlier = ignore
-            ?SYS_WARN("Unknown TRN: ~s", TRN),
+            ?SYS_WARN("Unknown TRN: ~s", [TRN]),
             process_confirmation(unknown, Data, NewState)
     end;
 process_message({#ucp_header{o_r = "O"} = Header, _Body} = Data, State) ->
