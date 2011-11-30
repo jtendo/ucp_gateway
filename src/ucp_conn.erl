@@ -4,14 +4,14 @@
 
 -behaviour(gen_fsm2).
 
-%%%----------------------------------------------------------------------
-%%% UCP SMSC client state machine.
-%%% Possible states are:
-%%%     connecting - actually disconnected, but retrying periodically
-%%%     wait_auth_response  - connected and sent auth message
-%%%     active - bound to SMSC server and ready to handle commands
-%%%     wait_reply - sent command and waiting for reply
-%%%----------------------------------------------------------------------
+%%----------------------------------------------------------------------
+%% UCP SMSC client state machine.
+%% Possible states are:
+%%     connecting - actually disconnected, but retrying periodically
+%%     wait_auth_response  - connected and sent auth message
+%%     active - bound to SMSC server and ready to handle commands
+%%     wait_reply - sent command and waiting for reply
+%%----------------------------------------------------------------------
 
 -include("ucp_syntax.hrl").
 -include("logger.hrl").
@@ -73,44 +73,44 @@
           transition_callback    %% function called when fsm changes state
          }).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
+%%===================================================================
+%% API
+%%===================================================================
 
 start_link({Name, {Host, Port, Login, Password}}) ->
     gen_fsm2:start_link(?MODULE, [Name, {Host, Port, Login, Password}],
         [{debug, [trace]}]).
 
-%%% --------------------------------------------------------------------
-%%% Get connection name.
-%%% --------------------------------------------------------------------
+%% --------------------------------------------------------------------
+%% Get connection name
+%% --------------------------------------------------------------------
 get_name(Ref) ->
     gen_fsm:sync_send_all_state_event(Ref, get_name).
 
-%%% --------------------------------------------------------------------
-%%% Get connection data as in configuration file
-%%% --------------------------------------------------------------------
+%% --------------------------------------------------------------------
+%% Get connection data as in configuration file
+%% --------------------------------------------------------------------
 get_reverse_config(Ref) ->
     gen_fsm:sync_send_all_state_event(Ref, get_reverse_config).
 
-%%% --------------------------------------------------------------------
-%%% Sending messages
-%%% --------------------------------------------------------------------
+%% --------------------------------------------------------------------
+%% Send messages
+%% --------------------------------------------------------------------
 send_message(Ref, Receiver, Message) ->
     send_message(Ref, Receiver, Message, []).
 
 send_message(Ref, Receiver, Message, Opts) ->
     gen_fsm:sync_send_event(Ref, {send_message, {Receiver, Message, Opts}}, ?CALL_TIMEOUT).
 
-%%% --------------------------------------------------------------------
-%%% Shutdown connection (and process) asynchronous.
-%%% --------------------------------------------------------------------
+%% --------------------------------------------------------------------
+%% Shutdown connection (and process) asynchronous.
+%% --------------------------------------------------------------------
 close(Ref) ->
     gen_fsm:send_all_state_event(Ref, close).
 
-%%%===================================================================
-%%% gen_fsm callbacks
-%%%===================================================================
+%%===================================================================
+%% gen_fsm callbacks
+%%===================================================================
 
 init([Name, {Host, Port, Login, Password}]) ->
     confetti:use(ucp_conf, [
@@ -127,7 +127,7 @@ init([Name, {Host, Port, Login, Password}]) ->
                     reply_timeout = proplists:get_value(reply_timeout,
                         SMSConnConfig, 20000),
                     keepalive_interval = proplists:get_value(keepalive_interval,
-                        SMSConnConfig, 62000),
+                        SMSConnConfig, 60000),
                     default_originator = proplists:get_value(default_originator,
                         SMSConnConfig, "orange.pl"),
                     dict = dict:new(),
@@ -138,7 +138,8 @@ init([Name, {Host, Port, Login, Password}]) ->
                         proplists:get_value(sending_window_size, SMSConnConfig,
                             ?SENDING_WINDOW_SIZE),
                     messages_unconfirmed = 0},
-    {ok, connecting, State, 0}. % Start connecting after timeout
+    % Start connecting after timeout
+    {ok, connecting, State, 0}.
 
 connecting(timeout, State) ->
     {ok, NextState, NewState} = connect(State),
@@ -189,9 +190,9 @@ handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
     {reply, {StateName, State}, StateName, State}.
 
-%%
-%% Packets arriving in various states
-%%
+%% --------------------------------------------------------------------
+%% Handle packets arriving in various states
+%% --------------------------------------------------------------------
 handle_info({tcp, _Socket, RawData}, connecting, State) ->
     ?SYS_WARN("TCP packet received when disconnected:~n~p", [RawData]),
     {next_state, connecting, State};
@@ -224,7 +225,7 @@ handle_info({tcp_error, _Socket, Reason}, StateName, State) ->
     {next_state, connecting, close_and_retry(State)};
 
 %%--------------------------------------------------------------------
-%% Handling timers timeouts
+%% Handle timers timeouts
 %%--------------------------------------------------------------------
 handle_info({timeout, Timer, {cmd_timeout, TRN}}, StateName, State) ->
     Dict = State#state.dict,
@@ -234,8 +235,8 @@ handle_info({timeout, Timer, {cmd_timeout, TRN}}, StateName, State) ->
             ?SYS_INFO("Message ~s timed out. TRN: ~p", [MsgId, TRN]),
             State#state{dict = NewDict};
         error ->
+            % Timed out message not in dictionary
             ?SYS_WARN("Unknown message timed out. TRN: ~p", [TRN]),
-            % timed_out_cmd_not_in_dict
             State
     end,
     case StateName of
@@ -248,7 +249,7 @@ handle_info({timeout, retry_connect}, connecting, State) ->
     {next_state, NextState, NewState};
 
 %%--------------------------------------------------------------------
-%% Ref keep-alive timer timeout = send keep-alive message to SMSC
+%% Handle keep-alive timer timeout = send keep-alive message to SMSC
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
     ?SYS_INFO("Idle connection. Sending keep-alive message", []),
@@ -267,12 +268,12 @@ handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
     {next_state, StateName, State};
 
 %%--------------------------------------------------------------------
-%% Ref configuration change
+%% Handle configuration change
 %%--------------------------------------------------------------------
 handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
     ?SYS_INFO("UCP Connection process ~p (~p) received configuration reload notification", [State#state.name, self()]),
     NewState = State#state{
-        keepalive_interval = proplists:get_value(keepalive_interval, SMSConnConfig, 62000),
+        keepalive_interval = proplists:get_value(keepalive_interval, SMSConnConfig, 60000),
         default_originator = proplists:get_value(default_originator, SMSConnConfig, "orange.pl")
     },
     {next_state, StateName, NewState};
@@ -281,7 +282,7 @@ handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
 %% Empty process message queue from the rubbish
 %%--------------------------------------------------------------------
 handle_info(Info, StateName, State) ->
-    ?SYS_WARN("Unexpected Info: ~p~nIn state: ~p~n when StateData is: ~p", [Info, StateName, State]),
+    ?SYS_WARN("Unexpected info (~p) in ~p state: ~p", [Info, StateName, State]),
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -301,7 +302,7 @@ code_change(_OldVsn, StateName, State, _Extra) ->
     {ok, StateName, State}.
 
 %%--------------------------------------------------------------------
-%% Ref state 'on entry' - provided by gen_fsm2
+%% Handle state 'on entry' - provided by gen_fsm2
 %%--------------------------------------------------------------------
 handle_state(StateName, State) ->
     apply_transition_callback(StateName, self(), State),
@@ -329,13 +330,13 @@ apply_transition_callback(Transition, Pid, State) when is_pid(Pid) ->
         _ -> ok
     end.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
+%%===================================================================
+%% Internal functions
+%%===================================================================
 
-%%%===================================================================
+%%===================================================================
 %% Cut message into pieces (if needed) then put them on the queue
-%%%===================================================================
+%%===================================================================
 enqueue_event(Event, From, State) ->
     enqueue_event(Event, From, State, false).
 
@@ -368,9 +369,9 @@ enqueue_message([H|T], Q, Ids) ->
     NQ = queue:in({Id, H}, Q),
     enqueue_message(T, NQ, [Id | Ids]).
 
-%%%===================================================================
+%%===================================================================
 %% Handle messages from queue
-%%%===================================================================
+%%===================================================================
 dequeue_message(State) ->
     case is_sending_allowed(State) of
         true ->
@@ -403,17 +404,15 @@ process_queued_message({Id, Body}, State) ->
         {ok, NewState} ->
             {next_state, get_next_state(NewState), NewState};
         {error, _Reason} ->
+            % Put it back on the queue and reconnect
             Q = queue:in_r({Id, Body}, State#state.msg_q),
             NewState = close_and_retry(State#state{msg_q = Q}),
             {next_state, connecting, NewState}
     end.
 
-get_next_state(State) ->
-    case is_sending_allowed(State) of
-        true -> active;
-        false -> wait_response
-    end.
-
+%%===================================================================
+%% Connect to SMSC and authenticate
+%%===================================================================
 connect(State) ->
     ?SYS_DEBUG("Connecting to SMSC: ~p -> ~p:~p", [State#state.name,
                                                    State#state.host,
@@ -436,6 +435,28 @@ connect(State) ->
             {ok, connecting, NewState}
     end.
 
+%%===================================================================
+%% Close connection and cleanup
+%%===================================================================
+close_and_retry(State) ->
+    close_and_retry(State, ?RETRY_TIMEOUT).
+
+close_and_retry(State, Timeout) ->
+    catch gen_tcp:close(State#state.socket),
+    % put unconfirmed messages back on queue
+    {Queue, UnconfirmedNo} = dict:fold(
+              fun(_Id, [{Timer, Id, Msg}|_], {Q, C}) ->
+                      cancel_timer(Timer),
+                      {queue:in_r({Id, Msg}, Q), C - 1};
+                 (_, _, V) ->
+                      V
+              end, {State#state.msg_q, State#state.messages_unconfirmed}, State#state.dict),
+    erlang:send_after(Timeout, self(), {timeout, retry_connect}),
+    State#state{socket = null, msg_q = Queue, dict = dict:new(), messages_unconfirmed = UnconfirmedNo}.
+
+%%===================================================================
+%% Send message through active socket
+%%===================================================================
 post_message(MsgId, {cmd_body, CmdId, Body} = Msg, State) ->
     {ok, UpdatedTRN, Message} = ucp_utils:create_message(State#state.trn, CmdId, Body),
     ?SYS_DEBUG("Sending message (~s): ~p", [MsgId, Message]),
@@ -456,6 +477,15 @@ update_sending_counter(Value, State) ->
 is_sending_allowed(State) ->
     State#state.messages_unconfirmed < State#state.sending_window_size.
 
+get_next_state(State) ->
+    case is_sending_allowed(State) of
+        true -> active;
+        false -> wait_response
+    end.
+
+%%===================================================================
+%% Cancel timer
+%%===================================================================
 cancel_timer(undefined) ->
     ok;
 cancel_timer(Timer) ->
@@ -472,23 +502,8 @@ cancel_timer(Timer) ->
             ok
     end.
 
-close_and_retry(State) ->
-    close_and_retry(State, ?RETRY_TIMEOUT).
-
-close_and_retry(State, Timeout) ->
-    catch gen_tcp:close(State#state.socket),
-    {Queue, UnconfirmedNo} = dict:fold(
-              fun(_Id, [{Timer, Id, Msg}|_], {Q, C}) ->
-                      cancel_timer(Timer),
-                      {queue:in_r({Id, Msg}, Q), C - 1};
-                 (_, _, V) ->
-                      V
-              end, {State#state.msg_q, State#state.messages_unconfirmed}, State#state.dict),
-    erlang:send_after(Timeout, self(), {timeout, retry_connect}),
-    State#state{socket = null, msg_q = Queue, dict = dict:new(), messages_unconfirmed = UnconfirmedNo}.
-
 %%-----------------------------------------------------------------------
-%% Deals with incoming messages
+%% Deals with incoming data from socket
 %%-----------------------------------------------------------------------
 handle_received_data(Data, State) ->
     case ucp_utils:decode_message(Data) of
@@ -497,8 +512,7 @@ handle_received_data(Data, State) ->
             process_message(Message, State);
         Error ->
             % Decoding failed = ignore message
-            %TODO: Make sure is't OK?
-            ?SYS_WARN("Error parsing data: ~p", [Error]),
+            ?SYS_WARN("Error parsing received data: ~p", [Error]),
             Error
     end.
 
@@ -511,23 +525,25 @@ process_message({#ucp_header{o_r = "R", trn = TRN}, _Body} = Data, State) ->
         {Timer, MsgId, _Msg} ->
             cancel_timer(Timer),
             NewDict = dict:erase(IntTRN, NewState#state.dict),
-            process_confirmation(MsgId, Data, NewState#state{dict = NewDict});
+            process_result(MsgId, Data, NewState#state{dict = NewDict});
         {error, unknown_trn} -> % message must have expired earlier = ignore
             ?SYS_WARN("Unknown TRN: ~s", [TRN]),
-            process_confirmation(unknown, Data, NewState)
+            process_result(unknown, Data, NewState)
     end;
 process_message({#ucp_header{o_r = "O"} = Header, _Body} = Data, State) ->
     {ok, Ack} = ucp_messages:create_ack(Header),
     ?SYS_INFO("Sending ACK message: ~p", [Ack]),
-    %TODO: Check sending result = Don't know what to do when error!!
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
-    process_reception(Data, State).
+    process_operation(Data, State).
 
-process_confirmation(_MsgId, {#ucp_header{ot = "31"}, _Body}, State) ->
+%%-----------------------------------------------------------------------
+%% Process result message
+%%-----------------------------------------------------------------------
+process_result(_MsgId, {#ucp_header{ot = "31"}, _Body}, State) ->
     % just keepalive ack/nack - do nothing
     {ok, State};
 
-process_confirmation(MsgId, {#ucp_header{ot = "51"}, Body}, State) ->
+process_result(MsgId, {#ucp_header{ot = "51"}, Body}, State) ->
     % message reception confirmation
     case Body of
         #ack{} -> % confirmed
@@ -537,13 +553,16 @@ process_confirmation(MsgId, {#ucp_header{ot = "51"}, Body}, State) ->
     end,
     {ok, State};
 
-process_confirmation(_MsgId, {#ucp_header{ot = "60"}, Body}, State) ->
+process_result(_MsgId, {#ucp_header{ot = "60"}, Body}, State) ->
     case Body of
         #ack{} -> {auth_ok, State};
         #nack{} -> {auth_failed, Body#nack.sm, State}
     end.
 
-process_reception({#ucp_header{ot = "52"}, Body}, State) ->
+%%-----------------------------------------------------------------------
+%% Process account addressed message
+%%-----------------------------------------------------------------------
+process_operation({#ucp_header{ot = "52"}, Body}, State) ->
     % Ref message
     Recipient = Body#ucp_cmd_5x.adc,
     Data = Body#ucp_cmd_5x.msg,
@@ -551,12 +570,12 @@ process_reception({#ucp_header{ot = "52"}, Body}, State) ->
     gen_event:notify(ucp_event, {sms, {Recipient, Sender, Data}}),
     {ok, State};
 
-process_reception({#ucp_header{ot = "53"}, Body}, State) ->
+process_operation({#ucp_header{ot = "53"}, Body}, State) ->
     Info = hex:hexstr_to_list(ucp_utils:from_ira(Body#ucp_cmd_5x.msg)),
     ?SYS_INFO("Received delivery report message: ~p", [Info]),
     {ok, State};
 
-process_reception(Message, State) ->
+process_operation(Message, State) ->
     ?SYS_DEBUG("Unhandled message: ~p", [Message]),
     {ok, State}.
 
