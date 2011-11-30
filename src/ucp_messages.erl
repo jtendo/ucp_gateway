@@ -1,16 +1,13 @@
 -module(ucp_messages).
--author('rafal.galczynski@jtendo.com').
 -author('andrzej.trawinski@jtendo.com').
--author('adam.rutkowski@jtendo.com').
 
 -include("ucp_syntax.hrl").
 -include("logger.hrl").
 
--export([
-         create_cmd_31/2,
-         create_cmd_51/4,
-         create_cmd_51/5,
-         create_cmd_60/3,
+-export([create_cmd_31_body/1,
+         create_cmd_51_body/4,
+         create_cmd_51_body/5,
+         create_cmd_60_body/2,
          create_ack/1]).
 
 -define(BIN_BODY_MAX_SIZE, 140).
@@ -28,10 +25,10 @@
 %%--------------------------------------------------------------------
 %% Create UCP 51 message
 %%--------------------------------------------------------------------
-create_cmd_51(TRN, Sender, Receiver, Message) ->
-    create_cmd_51(TRN, Sender, Receiver, Message, []).
+create_cmd_51_body(CRef, Sender, Receiver, Message) ->
+    create_cmd_51_body(CRef, Sender, Receiver, Message, []).
 
-create_cmd_51(TRN, Sender, Receiver, Message, Options) when is_binary(Message) ->
+create_cmd_51_body(CRef, Sender, Receiver, Message, Options) when is_binary(Message) ->
     % TODO: Check max sender len. 16
     {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
     TempBody = #ucp_cmd_5x{
@@ -45,12 +42,12 @@ create_cmd_51(TRN, Sender, Receiver, Message, Options) when is_binary(Message) -
               pr = "0"},
     case check_cmd_5x_options(TempBody, Options) of
         {ok, Body} ->
-            check_cmd_5x_splitting(TRN, Body, Message, Options);
+            check_cmd_5x_splitting(CRef, Body, Message, Options);
         Error ->
             Error
     end;
 
-create_cmd_51(TRN, Sender, Receiver, Message, Options) when is_list(Message) ->
+create_cmd_51_body(CRef, Sender, Receiver, Message, Options) when is_list(Message) ->
     % Check max sender len. 16
     {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
     {XSer, MT, ConvMessage} = case unicode:bin_is_7bit(unicode:characters_to_binary(Message)) of
@@ -65,45 +62,44 @@ create_cmd_51(TRN, Sender, Receiver, Message, Options) when is_list(Message) ->
                   xser = XSer},
     case check_cmd_5x_options(TempBody, Options) of
         {ok, Body} ->
-            check_cmd_5x_splitting(TRN, Body, ConvMessage, Options);
+            check_cmd_5x_splitting(CRef, Body, ConvMessage, Options);
         Error ->
             Error
     end.
 
-check_cmd_5x_splitting(TRN, Body, Message, Options) ->
+check_cmd_5x_splitting(CRef, Body, Message, Options) ->
     % Check spitting option
     case proplists:get_value(split, Options, false) of
         true ->
-            {result, MsgRec} = split_message(Message, Body#ucp_cmd_5x.xser, TRN),
-            process_cmd_51_parts(TRN, Body, MsgRec);
+            {result, MsgRec, NewCRef} = split_message(CRef, Body#ucp_cmd_5x.xser, Message),
+            process_cmd_51_parts(NewCRef, Body, MsgRec);
         _ ->
-            form_cmd_51(TRN, Body, Body#ucp_cmd_5x.xser, Message)
+            {ok, CRef, [form_cmd_51_body(Body, Body#ucp_cmd_5x.xser, Message)]}
     end.
 
-process_cmd_51_parts(TRN, Body, MsgRec) ->
-    process_cmd_51_parts(TRN, Body, MsgRec, []).
+process_cmd_51_parts(CRef, Body, MsgRec) ->
+    process_cmd_51_parts(CRef, Body, MsgRec, []).
 
-process_cmd_51_parts(TRN, _Body, [], Result) ->
-    {ok, {lists:reverse(Result), TRN}};
-process_cmd_51_parts(TRN, Body, [{XSer, Message}|Rest], Result) ->
-    {ok, {[MsgRec], NewTRN}} = form_cmd_51(TRN, Body, XSer, Message),
-    process_cmd_51_parts(NewTRN, Body, Rest, [MsgRec | Result]).
+process_cmd_51_parts(CRef, _Body, [], Result) ->
+    {ok, CRef, lists:reverse(Result)};
+process_cmd_51_parts(CRef, Body, [{XSer, Message}|Rest], Result) ->
+    UpdatedBody = form_cmd_51_body(Body, XSer, Message),
+    process_cmd_51_parts(CRef, Body, Rest, [UpdatedBody | Result]).
 
 %%--------------------------------------------------------------------
 %% Form UCP 51 message
-%%--------------------------------------------------------------------
-form_cmd_51(TRN, Body, XSer, Message) ->
+%--------------------------------------------------------------------
+form_cmd_51_body(Body, XSer, Message) ->
     UCPMsg = lists:flatten(hex:to_hexstr(Message)),
     NB = case Body#ucp_cmd_5x.mt of
                 "4" -> integer_to_list(length(UCPMsg) * 4);
                 _ -> []
          end,
     UpdatedBody = Body#ucp_cmd_5x{
-                                xser = XSer,
-                                nb = NB,
-                                msg = UCPMsg},
-    {Header, NewTRN} = create_header(TRN, "51"),
-    {ok, {[{NewTRN, ucp_utils:compose_message(Header, UpdatedBody)}], NewTRN}}.
+                        xser = XSer,
+                        nb = NB,
+                        msg = UCPMsg},
+    {cmd_body, "51", UpdatedBody}.
 
 %%--------------------------------------------------------------------
 %% Function checks ucp_cmd_5x options
@@ -132,9 +128,9 @@ check_cmd_5x_options(_Rec, [H|_T]) ->
     {error, unknown_option}.
 
 %%--------------------------------------------------------------------
-%% Function try to create UCP 60 Message Login
+%% Create body of UCP 60 - loging message
 %%--------------------------------------------------------------------
-create_cmd_60(TRN, Login,  Password) ->
+create_cmd_60_body(Login,  Password) ->
     IRAPassword = lists:flatten(hex:to_hexstr(ucp_utils:to_ira(Password))),
     Body = #ucp_cmd_60{
               oadc = Login,
@@ -143,35 +139,27 @@ create_cmd_60(TRN, Login,  Password) ->
               styp = "1",
               pwd = IRAPassword,
               vers = "0100"},
-    {Header, NewTRN} = create_header(TRN, "60"),
-    {ok, {[{NewTRN, ucp_utils:compose_message(Header, Body)}], NewTRN}}.
+    {cmd_body, "60", Body}.
 
 %%--------------------------------------------------------------------
-%% Function try to create UCP 31 Alert / used as keep alive
+%% Create body of UCP 31 - alert message / used for keep-alive
 %%--------------------------------------------------------------------
-create_cmd_31(TRN, Address) ->
+create_cmd_31_body(Address) ->
     Body = #ucp_cmd_31{
               adc = Address,
               pid = "0539"},
-    {Header, NewTRN} = create_header(TRN, "31"),
-    {ok, {[{NewTRN, ucp_utils:compose_message(Header, Body)}], NewTRN}}.
+    {cmd_body, "31", Body}.
 
-
+%%--------------------------------------------------------------------
+%% Create body of ACK message
+%%--------------------------------------------------------------------
 create_ack(Header) when is_record(Header, ucp_header) ->
     {ok, ucp_utils:compose_message(Header#ucp_header{o_r = "R"}, #ack{})}.
-
-create_header(TRN, CmdId) ->
-    NewTRN = ucp_utils:get_next_trn(TRN),
-    Header = #ucp_header{
-                  trn = ucp_utils:trn_to_str(NewTRN),
-                  o_r = "O",
-                  ot = CmdId},
-    {Header, NewTRN}.
 
 %%--------------------------------------------------------------------
 %% Message splitting
 %%--------------------------------------------------------------------
-split_message(Message, XSer, Ref) when is_binary(Message) ->
+split_message(CRef, XSer, Message) when is_binary(Message) ->
     % TODO: catch parsing errors
     {ok, Services} = xser_to_services(XSer),
     {ok, L} = service_to_udh(proplists:get_value(1, Services)),
@@ -184,7 +172,7 @@ split_message(Message, XSer, Ref) when is_binary(Message) ->
             case do_splitting(Message, UDH) of
                 {ok, Result} ->
                     % pass services without UDH - we'll build it inside
-                    add_concat_info(Result, proplists:delete(1, Services), UDH, Ref);
+                    add_concat_info(CRef, Result, proplists:delete(1, Services), UDH);
                 Error ->
                     Error
             end;
@@ -197,24 +185,24 @@ split_message(Message, XSer, Ref) when is_binary(Message) ->
                             {ok, NewXSer} = services_to_xser([Service1 | proplists:delete(1, Services)]),
                             NewXSer
                       end,
-            {result, [{ModXSer, Message}]}
+            {result, [{ModXSer, Message}], CRef}
     end;
 
 %TODO: check splitting for Text messages
-split_message(Message, XSer, _Ref) ->
-    {result, [{XSer, Message}]}.
+split_message(CRef, XSer, Message) ->
+    {result, [{XSer, Message}], CRef}.
 
-add_concat_info(Bins, Services, UDH, Ref) ->
-    add_concat_info(Bins, Services, UDH, Ref, length(Bins), 1, []).
+add_concat_info(CRef, Bins, Services, UDH) ->
+    add_concat_info(CRef, Bins, Services, UDH, length(Bins), 1, []).
 
-add_concat_info([Bin], Services, UDH, _Ref, Parts, _PartNo, _Result) when Parts =< 1 ->
+add_concat_info(CRef, [Bin], Services, UDH, Parts, _PartNo, _Result) when Parts =< 1 ->
     {ok, Service1} = udh_to_service(UDH),
     {ok, XSer} = services_to_xser([Service1 | Services]),
-    {result, {XSer, Bin}};
-add_concat_info([], _Services, _UDH, _Ref, _Parts, _PartNo, Result) ->
-    {result, lists:reverse(Result)};
-add_concat_info([H|T], Services, UDH, Ref, Parts, PartNo, Result) ->
-    Ref = Ref rem 256,
+    {result, {XSer, Bin}, CRef};
+add_concat_info(CRef, [], _Services, _UDH, _Parts, _PartNo, Result) ->
+    {result, lists:reverse(Result), CRef};
+add_concat_info(CRef, [H|T], Services, UDH, Parts, PartNo, Result) ->
+    Ref = ucp_utils:get_next_ref(CRef),
     IE = {0, {info_element, {0, 3, [Ref, Parts, PartNo]}}},
     {ok, Service1} = udh_to_service([IE | UDH]),
     {ok, XSer} = services_to_xser([Service1 | Services]),
@@ -222,7 +210,7 @@ add_concat_info([H|T], Services, UDH, Ref, Parts, PartNo, Result) ->
                 1 -> proplists:delete(?STK_IE, UDH);
                 _ -> UDH
              end,
-    add_concat_info(T, Services, ModUDH, Ref, Parts, PartNo+1, [{XSer, H}|Result]).
+    add_concat_info(Ref, T, Services, ModUDH, Parts, PartNo+1, [{XSer, H}|Result]).
 
 %%--------------------------------------------------------------------
 %% Perform message splitting

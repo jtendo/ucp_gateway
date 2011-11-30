@@ -4,13 +4,14 @@
 
 -behaviour(gen_fsm2).
 
-%%%----------------------------------------------------------------------
-%%% UCP SMSC client state machine.
-%%% Possible states are:
-%%%     connecting - actually disconnected, but retrying periodically
-%%%     wait_auth_response  - connected and sent auth request
-%%%     active - bound to SMSC server and ready to handle commands
-%%%----------------------------------------------------------------------
+%%----------------------------------------------------------------------
+%% UCP SMSC client state machine.
+%% Possible states are:
+%%     connecting - actually disconnected, but retrying periodically
+%%     wait_auth_response  - connected and sent auth message
+%%     active - bound to SMSC server and ready to handle commands
+%%     wait_reply - sent command and waiting for reply
+%%----------------------------------------------------------------------
 
 -include("ucp_syntax.hrl").
 -include("logger.hrl").
@@ -18,7 +19,6 @@
 
 %% API
 -export([start_link/1,
-         %get_status/1,
          get_reverse_config/1,
          get_name/1,
          send_message/3,
@@ -30,6 +30,7 @@
          connecting/2,
          connecting/3,
          wait_auth_response/3,
+         wait_response/3,
          active/3,
          handle_event/3,
          handle_sync_event/4,
@@ -37,115 +38,106 @@
          terminate/3,
          code_change/4]).
 
+%% gen_fsm2 callback
 -export([handle_state/2]).
 
 -define(SERVER, ?MODULE).
--define(AUTH_TIMEOUT, ?CFG(auth_timeout, ucp_conf, 5000)).
 -define(CMD_TIMEOUT, ?CFG(cmd_timeout, ucp_conf, 3000)).
 -define(SEND_TIMEOUT, ?CFG(send_timeout, ucp_conf, 1000)).
 -define(RETRY_TIMEOUT, ?CFG(retry_timeout, ucp_conf, 10000)).
 -define(CALL_TIMEOUT, ?CFG(call_timeout, ucp_conf, 3000)).
 -define(CONNECTION_TIMEOUT, ?CFG(connection_timeout, ucp_conf, 2000)).
-%% Grace period after auth errors:
+%% Grace period after auth errors
 -define(GRACEFUL_RETRY_TIMEOUT, ?CFG(graceful_retry_timeout, ucp_conf, 5000)).
--define(MIN_MESSAGE_TRN, ?CFG(min_message_trn, ucp_conf, 0)).
--define(MAX_MESSAGE_TRN, ?CFG(max_message_trn, ucp_conf, 99)).
-
+-define(SENDING_WINDOW_SIZE, ?CFG(sending_window_size, ucp_conf, 1)).
 -define(TCP_OPTIONS, [binary, {packet, 0}, {active, true}, {reuseaddr, true},
         {keepalive, true}, {send_timeout, ?SEND_TIMEOUT}, {send_timeout_close, false}]).
 
 -record(state, {
-          name,     %% Name of connection
-          host,     %% smsc address
-          port,     %% smsc port
-          login,    %% smsc login
-          pass,     %% smsc password
-          socket,   %% smsc socket
-          auth_timer, %% ref to auth timeout
-          last_usage, %% timestamp of last socket usage
-          trn = 0,   %% message sequence number
-          cntr = 500, %% smspp message counter
-          reply_timeout, %% reply time of smsc
-          keepalive_interval, %% interval between sending keepalive ucp31 messages
-          keepalive_timer,
-          send_interval, %% time distance between sends
-          default_originator, %% default sms originator
-          dict, %% dict holding operation params and results
-          req_q, %% queue for requests
-          transition_callback
+          name,                  %% name of connection
+          host,                  %% smsc address
+          port,                  %% smsc port
+          login,                 %% smsc login
+          pass,                  %% smsc password
+          socket,                %% smsc socket
+          trn,                   %% message sequence number
+          cref,                  %% message concatenation reference number
+          keepalive_interval,    %% interval between sending keep-alive messages
+          keepalive_timer,       %% keep-alive timer
+          default_originator,    %% default sms originator
+          dict,                  %% dict holding messages params
+          msg_q,                 %% queue for messages
+          sending_window_size,   %% max number of messages that can be sent to smsc
+                                 %% without waiting for acknowledge
+          messages_unconfirmed,  %% number of messages waiting for acknowledge
+          transition_callback    %% function called when fsm changes state
          }).
 
-%%%===================================================================
-%%% API
-%%%===================================================================
+%%===================================================================
+%% API
+%%===================================================================
 
 start_link({Name, {Host, Port, Login, Password}}) ->
-    gen_fsm2:start_link(?MODULE, [Name, {Host, Port, Login, Password}], []). %[{debug, [trace, log]}]
+    gen_fsm2:start_link(?MODULE, [Name, {Host, Port, Login, Password}],
+        [{debug, [trace]}]).
 
-%%% --------------------------------------------------------------------
-%%% Get status of connection.
-%%% --------------------------------------------------------------------
-%get_status(Handle) ->
-%    gen_fsm:sync_send_all_state_event(Handle, get_status).
+%% --------------------------------------------------------------------
+%% Get connection name
+%% --------------------------------------------------------------------
+get_name(Ref) ->
+    gen_fsm:sync_send_all_state_event(Ref, get_name).
 
-%%% --------------------------------------------------------------------
-%%% Get connection name.
-%%% --------------------------------------------------------------------
-get_name(Handle) ->
-    gen_fsm:sync_send_all_state_event(Handle, get_name).
+%% --------------------------------------------------------------------
+%% Get connection data as in configuration file
+%% --------------------------------------------------------------------
+get_reverse_config(Ref) ->
+    gen_fsm:sync_send_all_state_event(Ref, get_reverse_config).
 
-%%% --------------------------------------------------------------------
-%%% Get connection data as in configuration file
-%%% --------------------------------------------------------------------
-get_reverse_config(Handle) ->
-    gen_fsm:sync_send_all_state_event(Handle, get_reverse_config).
+%% --------------------------------------------------------------------
+%% Send messages
+%% --------------------------------------------------------------------
+send_message(Ref, Receiver, Message) ->
+    send_message(Ref, Receiver, Message, []).
 
-%%% --------------------------------------------------------------------
-%%% Sending messages
-%%% --------------------------------------------------------------------
-send_message(Handle, Receiver, Message) ->
-    send_message(Handle, Receiver, Message, []).
+send_message(Ref, Receiver, Message, Opts) ->
+    gen_fsm:sync_send_event(Ref, {send_message, {Receiver, Message, Opts}}, ?CALL_TIMEOUT).
 
-send_message(Handle, Receiver, Message, Opts) ->
-    gen_fsm:sync_send_event(Handle, {send_message, {Receiver, Message, Opts}}, ?CALL_TIMEOUT).
+%% --------------------------------------------------------------------
+%% Shutdown connection (and process) asynchronous.
+%% --------------------------------------------------------------------
+close(Ref) ->
+    gen_fsm:send_all_state_event(Ref, close).
 
-%%% --------------------------------------------------------------------
-%%% Shutdown connection (and process) asynchronous.
-%%% --------------------------------------------------------------------
-close(Handle) ->
-    gen_fsm:send_all_state_event(Handle, close).
-
-%%%===================================================================
-%%% gen_fsm callbacks
-%%%===================================================================
+%%===================================================================
+%% gen_fsm callbacks
+%%===================================================================
 
 init([Name, {Host, Port, Login, Password}]) ->
     confetti:use(ucp_conf, [
             {location, {"ucp_conf.conf", "conf"}},
-            {validators, [fun ensure_transition_callback/1]}
-        ]),
+            {validators, [fun ensure_transition_callback/1]}]),
     SMSConnConfig = confetti:fetch(ucp_conf),
     State = #state{ name = Name,
                     host = Host,
                     port = Port,
                     login = Login,
                     pass = Password,
-                    last_usage = erlang:now(), % FIXME
                     trn = 0,
-                    reply_timeout = proplists:get_value(reply_timeout,
-                        SMSConnConfig, 20000),
+                    cref = 0,
                     keepalive_interval = proplists:get_value(keepalive_interval,
-                        SMSConnConfig, 62000),
+                        SMSConnConfig, 60000),
                     default_originator = proplists:get_value(default_originator,
                         SMSConnConfig, "orange.pl"),
-                    send_interval = proplists:get_value(send_interval,
-                        SMSConnConfig, "20000"),
                     dict = dict:new(),
-                    req_q = queue:new(),
-                    transition_callback = proplists:get_value(transition_callback,
-                        SMSConnConfig)
-                },
-    {ok, connecting, State, 0}. % Start connecting after timeout
+                    msg_q = queue:new(),
+                    transition_callback =
+                        proplists:get_value(transition_callback, SMSConnConfig),
+                    sending_window_size =
+                        proplists:get_value(sending_window_size, SMSConnConfig,
+                            ?SENDING_WINDOW_SIZE),
+                    messages_unconfirmed = 0},
+    % Start connecting after timeout
+    {ok, connecting, State, 0}.
 
 connecting(timeout, State) ->
     {ok, NextState, NewState} = connect(State),
@@ -153,17 +145,27 @@ connecting(timeout, State) ->
 
 connecting(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in connecting state: ~p", [From, Event]),
-    Q = queue:in({Event, From}, State#state.req_q),
-    {next_state, connecting, State#state{req_q = Q}}.
+    {ok, NewState} = enqueue_event(Event, From, State),
+    {next_state, connecting, NewState}.
 
 wait_auth_response(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in wait_auth state: ~p", [From, Event]),
-    Q = queue:in({Event, From}, State#state.req_q),
-    {next_state, wait_auth_response, State#state{req_q = Q}}.
+    {ok, NewState} = enqueue_event(Event, From, State),
+    {next_state, wait_auth_response, NewState}.
+
+wait_response(Event, From, State) ->
+    ?SYS_INFO("Received event from ~p in wait_response state: ~p", [From, Event]),
+    {ok, NewState} = enqueue_event(Event, From, State, true),
+    {next_state, wait_response, NewState}.
 
 active(Event, From, State) ->
     ?SYS_INFO("Received event from ~p in active state: ~p", [From, Event]),
-    process_message(Event, From, State).
+    {ok, NewState} = enqueue_event(Event, From, State, true),
+    {next_state, active, NewState}.
+
+handle_event(dequeue, active, State) ->
+    ?SYS_INFO("Handling dequeue event in active state", []),
+    dequeue_message(State);
 
 handle_event(close, _StateName, State) ->
     ?SYS_INFO("Closing connection request", []),
@@ -178,106 +180,88 @@ handle_sync_event(get_name, _From, StateName, State) ->
     {reply, {name, State#state.name}, StateName, State};
 
 handle_sync_event(get_reverse_config, _From, StateName, State) ->
-    ConfLine = { State#state.name, {State#state.host, State#state.port,
-                 State#state.login, State#state.pass, up }},
+    ConfLine = {State#state.name, {State#state.host, State#state.port,
+                State#state.login, State#state.pass, up}},
     {reply, {conf, ConfLine}, StateName, State};
 
 handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
     {reply, {StateName, State}, StateName, State}.
 
-%%
-%% Packets arriving in various states
-%%
+%% --------------------------------------------------------------------
+%% Handle packets arriving in various states
+%% --------------------------------------------------------------------
 handle_info({tcp, _Socket, RawData}, connecting, State) ->
     ?SYS_WARN("TCP packet received when disconnected:~n~p", [RawData]),
     {next_state, connecting, State};
 
-handle_info({tcp, _Socket, RawData}, wait_auth_response, State) ->
-    ?SYS_DEBUG("TCP packet received when wait_auth_response:~n~p", [RawData]),
-    cancel_timer(State#state.auth_timer),
-    case catch received_wait_auth_response(RawData, State) of
-        ok ->
-            % cancel keepalive timer if still alive
-            cancel_timer(State#state.keepalive_timer),
+handle_info({tcp, _Socket, RawData}, StateName, State) ->
+    ?SYS_DEBUG("TCP packet received in ~p state: ~p", [StateName, RawData]),
+    case catch handle_received_data(RawData, State) of
+        {ok, NewState} ->
             % process queued messages
-            {Action, NextState, NewState} = dequeue_messages(State),
-            ?SYS_INFO("Starting keepalive timer", []),
-            Timer = erlang:start_timer(NewState#state.keepalive_interval, self(), keepalive_timeout),
-            {Action, NextState, NewState#state{keepalive_timer = Timer}};
-        {auth_failed, Reason} ->
-            report_auth_failure(State, Reason),
-            {next_state, connecting, close_and_retry(State, ?GRACEFUL_RETRY_TIMEOUT)};
-        {'EXIT', Reason} ->
-            report_auth_failure(State, Reason),
-            {next_state, connecting, close_and_retry(State)};
-        {error, Reason} ->
-            report_auth_failure(State, Reason),
-            {next_state, connecting, close_and_retry(State)}
-    end;
-
-handle_info({tcp, _Socket, Data}, active, State) ->
-    case catch received_active(Data, State) of
-        {response, Response} ->
-            NewState = case Response of
-                       {reply, Reply, To, S1} -> gen_fsm:reply(To, Reply),
-                           S1;
-                       {ok, S1} ->
-                           S1
-                   end,
-            dequeue_messages(NewState);
+            gen_fsm:send_all_state_event(self(), dequeue),
+            {next_state, get_next_state(NewState), NewState};
+        {auth_ok, NewState} ->
+            % process queued messages
+            gen_fsm:send_all_state_event(self(), dequeue),
+            {next_state, active, NewState};
+        {auth_failed, Reason, NewState} ->
+            ?SYS_WARN("Authentication on ~p failed: ~p", [NewState#state.name, Reason]),
+            {next_state, connecting, close_and_retry(NewState, ?GRACEFUL_RETRY_TIMEOUT)};
         Error ->
-            ?SYS_WARN("Error handling data: ~p", [Error]),
-            {next_state, active, State}
+            ?SYS_WARN("Error handling TCP data: ~p", [Error]),
+            {next_state, StateName, State}
     end;
 
 handle_info({tcp_closed, _Socket}, StateName, State) ->
-    ?SYS_WARN("SMSC server closed the connection: ~p~nIn State: ~p",
-                 [State#state.name, StateName]),
+    ?SYS_WARN("TCP connection closed in ~p state", [StateName]),
     {next_state, connecting, close_and_retry(State)};
 
 handle_info({tcp_error, _Socket, Reason}, StateName, State) ->
-    ?SYS_DEBUG("TCP error received: ~p~nIn State: ~p", [Reason, StateName]),
+    ?SYS_DEBUG("TCP error occurred in ~p state: ~p", [StateName, Reason]),
     {next_state, connecting, close_and_retry(State)};
 
 %%--------------------------------------------------------------------
-%% Handling timers timeouts
+%% Handle timers timeouts
 %%--------------------------------------------------------------------
 handle_info({timeout, Timer, {cmd_timeout, TRN}}, StateName, State) ->
-    ?SYS_DEBUG("Message timed out: ~p", [TRN]),
-    case cmd_timeout(Timer, TRN, State) of
-        {reply, To, Reason, NewS} -> gen_fsm:reply(To, Reason),
-                                     {next_state, StateName, NewS};
-        {error, _Reason}           -> {next_state, StateName, State}
+    Dict = State#state.dict,
+    NewState = case dict:find(TRN, Dict) of
+        {ok, [{Timer, MsgId, _Msg}]} ->
+            NewDict = dict:erase(TRN, Dict),
+            ?SYS_INFO("Message ~s timed out. TRN: ~p", [MsgId, TRN]),
+            State#state{dict = NewDict};
+        error ->
+            % Timed out message not in dictionary
+            ?SYS_WARN("Unknown message timed out. TRN: ~p", [TRN]),
+            State
+    end,
+    case StateName of
+        wait_auth_response -> {next_state, connecting, close_and_retry(NewState)};
+        _Other -> {next_state, StateName, NewState}
     end;
 
 handle_info({timeout, retry_connect}, connecting, State) ->
-    ?SYS_WARN("retry_connect timeout!", []),
     {ok, NextState, NewState} = connect(State),
     {next_state, NextState, NewState};
-
-%%--------------------------------------------------------------------
-%% Handle autorization timeout = retry connection
-%%--------------------------------------------------------------------
-handle_info({timeout, _Timer, auth_timeout}, wait_auth_response, State) ->
-    ?SYS_WARN("auth timeout!", []),
-    {next_state, connecting, close_and_retry(State)};
 
 %%--------------------------------------------------------------------
 %% Handle keep-alive timer timeout = send keep-alive message to SMSC
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
-    {ok, {[{_, Message}], UpdatedTRN}} = ucp_messages:create_cmd_31(State#state.trn, State#state.login),
-    ?SYS_INFO("Sending keep-alive message: ~p", [Message]),
-    gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)),
-    Timer = erlang:start_timer(State#state.keepalive_interval, self(), keepalive_timeout),
-    {next_state, active, State#state{keepalive_timer = Timer, trn = UpdatedTRN}};
+    ?SYS_INFO("Idle connection. Sending keep-alive message", []),
+    Body = ucp_messages:create_cmd_31_body(State#state.login),
+    Id = get_message_id("KAM"),
+    NQ = queue:in({Id, Body}, State#state.msg_q),
+    gen_fsm:send_all_state_event(self(), dequeue),
+    {next_state, active, State#state{msg_q = NQ}};
 
 %%--------------------------------------------------------------------
 %% Cancel keepalive timer when not in active state
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
-    ?SYS_INFO("Canceling keepalive timer", []),
+    ?SYS_WARN("Canceling keepalive timer in non active state", []),
     cancel_timer(State#state.keepalive_timer),
     {next_state, StateName, State};
 
@@ -285,14 +269,10 @@ handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
 %% Handle configuration change
 %%--------------------------------------------------------------------
 handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
-    ?SYS_INFO("UCP Connection process ~p (~p) received configuration reload
-        notification", [State#state.name, self()]),
+    ?SYS_INFO("UCP Connection process ~p (~p) received configuration reload notification", [State#state.name, self()]),
     NewState = State#state{
-        reply_timeout = proplists:get_value(reply_timeout, SMSConnConfig, 20000),
-        keepalive_interval = proplists:get_value(keepalive_interval, SMSConnConfig, 62000),
-        default_originator = proplists:get_value(default_originator,
-            SMSConnConfig, "orange.pl"),
-        send_interval = proplists:get_value(send_interval, SMSConnConfig, "20000")
+        keepalive_interval = proplists:get_value(keepalive_interval, SMSConnConfig, 60000),
+        default_originator = proplists:get_value(default_originator, SMSConnConfig, "orange.pl")
     },
     {next_state, StateName, NewState};
 
@@ -300,7 +280,7 @@ handle_info({config_reloaded, SMSConnConfig}, StateName, State) ->
 %% Empty process message queue from the rubbish
 %%--------------------------------------------------------------------
 handle_info(Info, StateName, State) ->
-    ?SYS_WARN("Unexpected Info: ~p~nIn state: ~p~n when StateData is: ~p", [Info, StateName, State]),
+    ?SYS_WARN("Unexpected info (~p) in ~p state: ~p", [Info, StateName, State]),
     {next_state, StateName, State}.
 
 %%--------------------------------------------------------------------
@@ -348,231 +328,268 @@ apply_transition_callback(Transition, Pid, State) when is_pid(Pid) ->
         _ -> ok
     end.
 
-%%%===================================================================
-%%% Internal functions
-%%%===================================================================
-dequeue_messages(State) ->
-    case queue:out(State#state.req_q) of
-        {{value, {Event, From}}, Q} ->
-            case process_message(Event, From, State#state{req_q=Q}) of
-                {_, active, NewState} ->
-                    dequeue_messages(NewState);
-                Res ->
-                    Res
+%%===================================================================
+%% Internal functions
+%%===================================================================
+
+%%===================================================================
+%% Cut message into pieces (if needed) then put them on the queue
+%%===================================================================
+enqueue_event(Event, From, State) ->
+    enqueue_event(Event, From, State, false).
+
+enqueue_event({send_message, {Receiver, Message, Opts}}, From, State, Notify) ->
+    {ok, UpdatedCRef, Msgs} = ucp_messages:create_cmd_51_body(
+                                   State#state.cref,
+                                   State#state.default_originator,
+                                   Receiver,
+                                   Message,
+                                   Opts),
+    {ok, Q, Ids} = enqueue_message(Msgs, State#state.msg_q),
+    gen_fsm:reply(From, {ok, Ids}),
+    case Notify of
+        true -> gen_fsm:send_all_state_event(self(), dequeue);
+        _ -> ok
+    end,
+    {ok, State#state{msg_q = Q, cref = UpdatedCRef}};
+enqueue_event(Event, From, State, _Notify) ->
+    ?SYS_WARN("Unknown event received from ~p: ~p", [From, Event]),
+    {ok, State}.
+
+enqueue_message(Msgs, Q) ->
+    enqueue_message(Msgs, Q, []).
+
+enqueue_message([], Q, Ids) ->
+    {ok, Q, lists:reverse(Ids)};
+enqueue_message([H|T], Q, Ids) ->
+    Id = get_message_id(),
+    ?SYS_DEBUG("Enqueueing message (~s)", [Id]),
+    NQ = queue:in({Id, H}, Q),
+    enqueue_message(T, NQ, [Id | Ids]).
+
+%%===================================================================
+%% Handle messages from queue
+%%===================================================================
+dequeue_message(State) ->
+    case is_sending_allowed(State) of
+        true ->
+            ?SYS_DEBUG("Dequeueing...", []),
+            case queue:out(State#state.msg_q) of
+                {{value, Message}, Q} ->
+                    ?SYS_INFO("Canceling keepalive timer", []),
+                    cancel_timer(State#state.keepalive_timer),
+                    case process_queued_message(Message, State#state{msg_q = Q}) of
+                        {_, active, NewState} ->
+                            dequeue_message(NewState);
+                        Res ->
+                            Res
+                    end;
+                {empty, _} ->
+                    Timer = erlang:start_timer(State#state.keepalive_interval, self(), keepalive_timeout),
+                    ?SYS_INFO("Starting keepalive timer: ~p", [Timer]),
+                    {next_state, active, State#state{keepalive_timer = Timer}}
             end;
-        {empty, _} ->
-            {next_state, active, State}
+       false ->
+            ?SYS_DEBUG("Sending not allowed...", []),
+            ?SYS_INFO("Canceling keepalive timer", []),
+            cancel_timer(State#state.keepalive_timer),
+            {next_state, wait_response, State}
     end.
 
-process_message(Event, From, State) ->
-    ?SYS_INFO("Processing message: ~p", [Event]),
-    case process_event(Event, From, State) of
+process_queued_message({Id, Body}, State) ->
+    ?SYS_INFO("Processing message (~s)", [Id]),
+    case post_message(Id, Body, State) of
         {ok, NewState} ->
-            {next_state, active, NewState};
+            {next_state, get_next_state(NewState), NewState};
         {error, _Reason} ->
-            Q = queue:in_r({Event, From}, State#state.req_q),
-            NewState = close_and_retry(State#state{req_q = Q}),
+            % Put it back on the queue and reconnect
+            Q = queue:in_r({Id, Body}, State#state.msg_q),
+            NewState = close_and_retry(State#state{msg_q = Q}),
             {next_state, connecting, NewState}
     end.
 
+%%===================================================================
+%% Connect to SMSC and authenticate
+%%===================================================================
 connect(State) ->
-    ?SYS_DEBUG("Connecting to ~p -> ~p:~p", [State#state.name, State#state.host, State#state.port]),
-    case gen_tcp:connect(State#state.host, State#state.port, ?TCP_OPTIONS, ?CONNECTION_TIMEOUT) of
+    ?SYS_DEBUG("Connecting to SMSC: ~p -> ~p:~p", [State#state.name,
+                                                   State#state.host,
+                                                   State#state.port]),
+    case gen_tcp:connect(State#state.host, State#state.port,
+            ?TCP_OPTIONS, ?CONNECTION_TIMEOUT) of
         {ok, Socket} ->
-            case send_auth_message(State#state{socket = Socket}) of
+            Body = ucp_messages:create_cmd_60_body(State#state.login, State#state.pass),
+            Id = get_message_id("AUTH"),
+            case post_message(Id, Body, State#state{socket = Socket}) of
                 {ok, NewState} ->
-                    Timer = erlang:start_timer(?AUTH_TIMEOUT, self(), auth_timeout),
-                    Ret = {ok, wait_auth_response, NewState#state{auth_timer = Timer}};
+                    {ok, wait_auth_response, NewState};
                 {error, Reason} ->
-                    report_auth_failure(State, Reason),
-                    Ret = {ok, connecting, close_and_retry(State)}
+                    ?SYS_WARN("Authentication on ~p failed: ~p", [State#state.name, Reason]),
+                    {ok, connecting, close_and_retry(State)}
             end;
         {error, Reason} ->
-            ?SYS_ERROR("SMSC connection ~p failed: ~p", [State#state.name, Reason]),
+            ?SYS_ERROR("Error connecting to ~p: ~p", [State#state.name, Reason]),
             NewState = close_and_retry(State),
-            Ret = {ok, connecting, NewState}
-    end,
-    Ret.
+            {ok, connecting, NewState}
+    end.
 
-report_auth_failure(State, Reason) ->
-    ?SYS_WARN("SMSC authentication failed on ~s: ~p", [State#state.name, Reason]).
+%%===================================================================
+%% Close connection and cleanup
+%%===================================================================
+close_and_retry(State) ->
+    close_and_retry(State, ?RETRY_TIMEOUT).
 
-send_auth_message(State) ->
-    {ok, {[{_, Message}], UpdatedTRN}} = ucp_messages:create_cmd_60(State#state.trn, State#state.login, State#state.pass),
-    ?SYS_DEBUG("Sending auth message: ~p", [Message]),
+close_and_retry(State, Timeout) ->
+    catch gen_tcp:close(State#state.socket),
+    % put unconfirmed messages back on queue
+    {Queue, UnconfirmedNo} = dict:fold(
+              fun(_Id, [{Timer, Id, Msg}|_], {Q, C}) ->
+                      cancel_timer(Timer),
+                      {queue:in_r({Id, Msg}, Q), C - 1};
+                 (_, _, V) ->
+                      V
+              end, {State#state.msg_q, State#state.messages_unconfirmed}, State#state.dict),
+    erlang:send_after(Timeout, self(), {timeout, retry_connect}),
+    State#state{socket = null, msg_q = Queue, dict = dict:new(), messages_unconfirmed = UnconfirmedNo}.
+
+%%===================================================================
+%% Send message through active socket
+%%===================================================================
+post_message(MsgId, {cmd_body, CmdId, Body} = Msg, State) ->
+    {ok, UpdatedTRN, Message} = ucp_utils:create_message(State#state.trn, CmdId, Body),
+    ?SYS_DEBUG("Sending message (~s): ~p", [MsgId, Message]),
     case gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)) of
-        ok -> {ok, State#state{trn = UpdatedTRN}};
+        ok ->
+            NewState = update_sending_counter(1, State),
+            Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, UpdatedTRN}),
+            ?SYS_INFO("Starting message (~s) timer: ~p", [MsgId, Timer]),
+            NewDict = dict:store(UpdatedTRN, [{Timer, MsgId, Msg}], NewState#state.dict),
+            {ok, NewState#state{dict = NewDict, trn = UpdatedTRN}};
         Error -> Error
     end.
 
-% {ok, newstate} lub {error, message}
-process_event({send_message, {Receiver, Message, Opts}} = Event, From, State) ->
-    {ok, {Msgs, UpdatedTRN}} =
-    ucp_messages:create_cmd_51(State#state.trn,
-                               State#state.default_originator,
-                               Receiver,
-                               Message,
-                               Opts),
-    send_messages(Event, From, Msgs, State#state{trn = UpdatedTRN});
+update_sending_counter(Value, State) ->
+    UnconfirmedNo = State#state.messages_unconfirmed + Value,
+    State#state{messages_unconfirmed = UnconfirmedNo}.
 
-process_event(Event, _From, State) ->
-    ?SYS_WARN("Unknown event: ~p", [Event]),
-    {ok, State}.
+is_sending_allowed(State) ->
+    State#state.messages_unconfirmed < State#state.sending_window_size.
 
-send_messages(_Event, _From, [], State) ->
-    {ok, State};
-send_messages(Event, From, [{TRN, Message}|Rest], State) ->
-    ?SYS_DEBUG("Sending message: ~p", [Message]),
-    case gen_tcp:send(State#state.socket, ucp_utils:wrap(Message)) of
-        ok ->
-            Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, TRN}),
-            NewDict = dict:store(TRN, [{Timer, Event, From}], State#state.dict),
-            send_messages(Event, From, Rest, State#state{dict = NewDict});
-        Error -> Error
-   end.
+get_next_state(State) ->
+    case is_sending_allowed(State) of
+        true -> active;
+        false -> wait_response
+    end.
 
+%%===================================================================
+%% Cancel timer
+%%===================================================================
 cancel_timer(undefined) ->
     ok;
 cancel_timer(Timer) ->
     Value = erlang:cancel_timer(Timer),
-    ?SYS_DEBUG("Timer ~p canceled with value: ~p", [Timer, Value]),
+    case Value of
+        false -> ok;
+        _ -> ?SYS_DEBUG("Timer ~p canceled with value: ~p", [Timer, Value])
+    end,
     receive
         {timeout, Timer, _} ->
+            ?SYS_DEBUG("Dupa",[]),
             ok
     after 0 ->
             ok
     end.
 
-close_and_retry(State, Timeout) ->
-    catch gen_tcp:close(State#state.socket),
-    Queue = dict:fold(
-              fun(_Id, [{Timer, Event, From}|_], Q) ->
-                      cancel_timer(Timer),
-                      queue:in_r({Event, From}, Q);
-                 (_, _, Q) ->
-                      Q
-              end, State#state.req_q, State#state.dict),
-    erlang:send_after(Timeout, self(), {timeout, retry_connect}),
-    State#state{socket = null, req_q = Queue, dict = dict:new()}.
-
-close_and_retry(State) ->
-    close_and_retry(State, ?RETRY_TIMEOUT).
-
 %%-----------------------------------------------------------------------
-%% received_wait_auth_response packet
-%% Deals with incoming packets in the wait_auth_response state
-%% Will return one of:
-%%  ok - Success - move to active state
-%%  {auth_failed, Reason} - Failed
-%%  {error, Reason}
-%%  {'EXIT', Reason} - Broken packet
+%% Deals with incoming data from socket
 %%-----------------------------------------------------------------------
-received_wait_auth_response(Data, State) ->
-    case ucp_utils:decode_message(Data) of
-        {ok, {Header, Body}} ->
-             check_trn(list_to_integer(Header#ucp_header.trn), State#state.trn),
-             check_auth_result(Body);
-        Else ->
-             {auth_failed, Else}
-    end.
-
-check_auth_result(Result) when is_record(Result, ack) ->
-    ok;
-check_auth_result(Result) when is_record(Result, nack) ->
-    {auth_failed, Result#nack.sm}.
-
-%%--------------------------------------------------------------------
-%% Compare TRN values
-%%--------------------------------------------------------------------
-check_trn(TRN, TRN) -> ok;
-check_trn(_, _)   -> throw({error, wrong_auth_trn}).
-
-%%-----------------------------------------------------------------------
-%% received_active
-%% Deals with incoming messages in the active state
-%% Will return one of:
-%%  {ok, NewS} - Don't reply to client
-%%  {reply, Result, From, NewS} - Reply with result to client From
-%%  {error, Reason}
-%%  {'EXIT', Reason} - Broke
-%%-----------------------------------------------------------------------
-received_active(Data, State) ->
+handle_received_data(Data, State) ->
     case ucp_utils:decode_message(Data) of
         {ok, Message} ->
-            ?SYS_DEBUG("Processing message: ~p", [Message]),
-            % TODO: catch processing errors
-            {response, process_message(Message, State)};
+            ?SYS_DEBUG("Processing received message: ~p", [Message]),
+            process_message(Message, State);
         Error ->
             % Decoding failed = ignore message
-            %TODO: Make sure is't OK?
-            ?SYS_WARN("Error parsing data: ~p", [Error]),
+            ?SYS_WARN("Error parsing received data: ~p", [Error]),
             Error
     end.
 
-process_message({#ucp_header{ot = "31", o_r = "R"}, _Body}, State) ->
-    % just keepalive ack/nack - do nothing
-    {ok, State};
-
-process_message({#ucp_header{ot = "51", o_r = "R", trn = TRN}, Body}, State) ->
+process_message({#ucp_header{o_r = "R", trn = TRN}, _Body} = Data, State) ->
+    % Update counter in state
+    NewState = update_sending_counter(-1, State),
+    % Cancel timers
     IntTRN = erlang:list_to_integer(TRN),
-    {Timer, _Event, From} = get_msg_rec(IntTRN, State#state.dict),
-    NewDict = dict:erase(IntTRN, State#state.dict),
-    cancel_timer(Timer),
-    Reply = check_result(Body),
-    {reply, Reply, From, State#state{dict = NewDict}};
-
-process_message({Header = #ucp_header{ot = "52", o_r = "O"}, Body}, State) ->
-    % respond with ACK
-    ?SYS_INFO("Received message: ~p", [Body]),
+    case get_msg_rec(IntTRN, NewState#state.dict) of
+        {Timer, MsgId, _Msg} ->
+            cancel_timer(Timer),
+            NewDict = dict:erase(IntTRN, NewState#state.dict),
+            process_result(MsgId, Data, NewState#state{dict = NewDict});
+        {error, unknown_trn} -> % message must have expired earlier = ignore
+            ?SYS_WARN("Unknown TRN: ~s", [TRN]),
+            process_result(unknown, Data, NewState)
+    end;
+process_message({#ucp_header{o_r = "O"} = Header, _Body} = Data, State) ->
     {ok, Ack} = ucp_messages:create_ack(Header),
     ?SYS_INFO("Sending ACK message: ~p", [Ack]),
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
-    %TODO: Check sending result = Don't know what to do when error!!
-    % Handle message
+    process_operation(Data, State).
+
+%%-----------------------------------------------------------------------
+%% Process result message
+%%-----------------------------------------------------------------------
+process_result(_MsgId, {#ucp_header{ot = "31"}, _Body}, State) ->
+    % just keepalive ack/nack - do nothing
+    {ok, State};
+
+process_result(MsgId, {#ucp_header{ot = "51"}, Body}, State) ->
+    % message reception confirmation
+    case Body of
+        #ack{} -> % confirmed
+            ?SYS_DEBUG("Message (~s) reception acknowledged", [MsgId]);
+        #nack{} -> % rejected
+            ?SYS_DEBUG("Message (~s) reception rejected: ~p", [MsgId, Body#nack.sm])
+    end,
+    {ok, State};
+
+process_result(_MsgId, {#ucp_header{ot = "60"}, Body}, State) ->
+    case Body of
+        #ack{} -> {auth_ok, State};
+        #nack{} -> {auth_failed, Body#nack.sm, State}
+    end.
+
+%%-----------------------------------------------------------------------
+%% Process account addressed message
+%%-----------------------------------------------------------------------
+process_operation({#ucp_header{ot = "52"}, Body}, State) ->
+    % Ref message
     Recipient = Body#ucp_cmd_5x.adc,
     Data = Body#ucp_cmd_5x.msg,
     Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
     gen_event:notify(ucp_event, {sms, {Recipient, Sender, Data}}),
     {ok, State};
 
-process_message({Header = #ucp_header{ot = "53", o_r = "O"}, Body}, State) ->
-    % respond with ACK
+process_operation({#ucp_header{ot = "53"}, Body}, State) ->
     Info = hex:hexstr_to_list(ucp_utils:from_ira(Body#ucp_cmd_5x.msg)),
     ?SYS_INFO("Received delivery report message: ~p", [Info]),
-    {ok, Ack} = ucp_messages:create_ack(Header),
-    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
-    gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
     {ok, State};
 
-process_message(Message = {Header, _Body}, State) ->
+process_operation(Message, State) ->
     ?SYS_DEBUG("Unhandled message: ~p", [Message]),
-    {ok, Ack} = ucp_messages:create_ack(Header),
-    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
-    gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
     {ok, State}.
-
-check_result(Result) when is_record(Result, ack) ->
-    ok;
-check_result(Result) when is_record(Result, nack) ->
-    {error, Result#nack.sm}.
-
-%%-----------------------------------------------------------------------
-%% Sort out timed out commands
-%%-----------------------------------------------------------------------
-cmd_timeout(Timer, TRN, State) ->
-    Dict = State#state.dict,
-    case dict:find(TRN, Dict) of
-        {ok, [{Timer, _Event, From}|_Res]} ->
-            NewDict = dict:erase(TRN, Dict),
-            {reply, From, {error, timeout}, State#state{dict = NewDict}};
-        error ->
-            {error, timed_out_cmd_not_in_dict}
-    end.
 
 get_msg_rec(TRN, Dict) ->
     case dict:find(TRN, Dict) of
-        {ok, [{Timer, Event, From}]} ->
-            {Timer, Event, From};
+        {ok, [{Timer, MsgId, Msg}]} ->
+            {Timer, MsgId, Msg};
         error ->
-            throw({error, unknown_trn})
+            {error, unknown_trn}
     end.
+
+%%-----------------------------------------------------------------------
+%% Create message identifier
+%%-----------------------------------------------------------------------
+get_message_id() ->
+    get_message_id("MSG").
+
+get_message_id(Prefix) ->
+    lists:concat([Prefix, ".", lists:subtract(erlang:ref_to_list(make_ref()), "#Ref<>")]).

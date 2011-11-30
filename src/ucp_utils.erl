@@ -13,10 +13,12 @@
          to_7bit/1,
          encode_sender/1,
          decode_sender/2,
+         create_message/3,
          compose_message/2,
          binary_split/2,
          pad_to/2,
          get_next_trn/1,
+         get_next_ref/1,
          trn_to_str/1,
          decode_message/1,
          wrap/1
@@ -26,6 +28,8 @@
 -define(ETX, 16#03).
 -define(MIN_MESSAGE_TRN, 0).
 -define(MAX_MESSAGE_TRN, 99).
+-define(MIN_MESSAGE_REF, 0).
+-define(MAX_MESSAGE_REF, 255).
 -define(UCP_HEADER_LEN, 13).
 -define(UCP_CHECKSUM_LEN, 2).
 -define(UCP_SEPARATOR, $/).
@@ -85,8 +89,16 @@ decode_sender(OTOA, OAdC) ->
            OAdC
     end.
 
+create_message(TRN, CmdId, Body) ->
+    NewTRN = get_next_trn(TRN),
+    Header = #ucp_header{
+                  trn = trn_to_str(NewTRN),
+                  o_r = "O",
+                  ot = CmdId},
+    {ok, NewTRN, compose_message(Header, Body)}.
+
 %%--------------------------------------------------------------------
-%% Function for composing whole ucp message
+%% Function for composing whole UCP message
 %%--------------------------------------------------------------------
 compose_message(Header, Body) ->
     HF = lists:nthtail(1, tuple_to_list(Header)),
@@ -121,9 +133,6 @@ get_8lsb(Integer) ->
 %%--------------------------------------------------------------------
 %% Function for calculating CRC checksum for UCP Message
 %%--------------------------------------------------------------------
-%calculate_crc(Data) when is_binary(Data) ->
-%    calculate_crc(lists:flatten(hex:to_hexstr(Data)));
-
 calculate_crc(Data) when is_list(Data) ->
     string:right(integer_to_list(get_8lsb(lists:sum(Data)), 16), 2, $0).
 
@@ -164,7 +173,6 @@ binary_split(Bin, Size, ChunkNo, Acc)->
                          [binary:part(Bin, ChunkNo*Size, Size)|Acc])
     end.
 
-
 pad_to(Width, Binary) ->
      case (Width - size(Binary) rem Width) rem Width
        of 0 -> Binary
@@ -182,6 +190,16 @@ get_next_trn(Val) when is_integer(Val) ->
     Val + 1.
 
 %%--------------------------------------------------------------------
+%% Increase with rotate Ref (Concatenation Reference Number) number
+%%--------------------------------------------------------------------
+get_next_ref(Val) when is_list(Val) ->
+    get_next_ref(list_to_integer(Val));
+get_next_ref(Val) when is_integer(Val) andalso Val >= ?MAX_MESSAGE_REF ->
+    ?MIN_MESSAGE_REF;
+get_next_ref(Val) when is_integer(Val) ->
+    Val + 1.
+
+%%--------------------------------------------------------------------
 %% Right pad TRN number with zeros
 %%--------------------------------------------------------------------
 trn_to_str(Val) when is_integer(Val) ->
@@ -196,7 +214,7 @@ decode_message(Msg = <<?STX, BinHeader:?UCP_HEADER_LEN/binary, _/binary>>) ->
     % TODO: handle rest of the message
     case size(Rest) of
         0 ->
-            ?SYS_INFO("Received UCP message: ~p", [binary:bin_to_list(MsgS)]),
+            ?SYS_DEBUG("Received UCP message: ~p", [binary:bin_to_list(MsgS)]),
             HeaderList = binary:bin_to_list(BinHeader),
             case list_to_tuple(re:split(HeaderList, "/", [{return, list}])) of
                 {TRN, LEN, OR, OT} ->
@@ -218,7 +236,6 @@ decode_message(Msg = <<?STX, BinHeader:?UCP_HEADER_LEN/binary, _/binary>>) ->
 
 decode_message(_) ->
     {error, invalid_message}.
-
 
 %%--------------------------------------------------------------------
 %% Parse UCP operations
