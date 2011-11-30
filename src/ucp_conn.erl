@@ -124,8 +124,6 @@ init([Name, {Host, Port, Login, Password}]) ->
                     pass = Password,
                     trn = 0,
                     cref = 0,
-                    reply_timeout = proplists:get_value(reply_timeout,
-                        SMSConnConfig, 20000),
                     keepalive_interval = proplists:get_value(keepalive_interval,
                         SMSConnConfig, 60000),
                     default_originator = proplists:get_value(default_originator,
