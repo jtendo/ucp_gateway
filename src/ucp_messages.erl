@@ -193,24 +193,27 @@ split_message(CRef, XSer, Message) ->
     {result, [{XSer, Message}], CRef}.
 
 add_concat_info(CRef, Bins, Services, UDH) ->
-    add_concat_info(CRef, Bins, Services, UDH, length(Bins), 1, []).
+    NextCRef = case length(Bins) > 1 of
+                   true -> ucp_utils:get_next_ref(CRef);
+                   false -> CRef
+               end,
+    {result, add_concat_info(NextCRef, Bins, Services, UDH, length(Bins), 1, []), NextCRef}.
 
-add_concat_info(CRef, [Bin], Services, UDH, Parts, _PartNo, _Result) when Parts =< 1 ->
+add_concat_info(_CRef, [Bin], Services, UDH, Parts, _PartNo, _Result) when Parts =< 1 ->
     {ok, Service1} = udh_to_service(UDH),
     {ok, XSer} = services_to_xser([Service1 | Services]),
-    {result, {XSer, Bin}, CRef};
-add_concat_info(CRef, [], _Services, _UDH, _Parts, _PartNo, Result) ->
-    {result, lists:reverse(Result), CRef};
+    [{XSer, Bin}];
+add_concat_info(_CRef, [], _Services, _UDH, _Parts, _PartNo, Result) ->
+    lists:reverse(Result);
 add_concat_info(CRef, [H|T], Services, UDH, Parts, PartNo, Result) ->
-    Ref = ucp_utils:get_next_ref(CRef),
-    IE = {0, {info_element, {0, 3, [Ref, Parts, PartNo]}}},
+    IE = {0, {info_element, {0, 3, [CRef, Parts, PartNo]}}},
     {ok, Service1} = udh_to_service([IE | UDH]),
     {ok, XSer} = services_to_xser([Service1 | Services]),
     ModUDH = case PartNo of
                 1 -> proplists:delete(?STK_IE, UDH);
                 _ -> UDH
              end,
-    add_concat_info(Ref, T, Services, ModUDH, Parts, PartNo+1, [{XSer, H}|Result]).
+    add_concat_info(CRef, T, Services, ModUDH, Parts, PartNo+1, [{XSer, H}|Result]).
 
 %%--------------------------------------------------------------------
 %% Perform message splitting
