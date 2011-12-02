@@ -155,17 +155,17 @@ wait_auth_response(Event, From, State) ->
     {next_state, wait_auth_response, NewState}.
 
 wait_response(Event, From, State) ->
-    ?SYS_INFO("Received event from ~p in wait_response state: ~p", [From, Event]),
+    ?SYS_DEBUG("Received event from ~p in wait_response state: ~p", [From, Event]),
     {ok, NewState} = enqueue_event(Event, From, State, true),
     {next_state, wait_response, NewState}.
 
 active(Event, From, State) ->
-    ?SYS_INFO("Received event from ~p in active state: ~p", [From, Event]),
+    %?SYS_DEBUG("Received event from ~p in active state: ~p", [From, Event]),
     {ok, NewState} = enqueue_event(Event, From, State, true),
     {next_state, active, NewState}.
 
 handle_event(dequeue, active, State) ->
-    ?SYS_INFO("Handling dequeue event in active state", []),
+    %?SYS_DEBUG("Handling dequeue event in active state", []),
     dequeue_message(State);
 
 handle_event(close, _StateName, State) ->
@@ -197,7 +197,7 @@ handle_info({tcp, _Socket, RawData}, connecting, State) ->
     {next_state, connecting, State};
 
 handle_info({tcp, _Socket, RawData}, StateName, State) ->
-    ?SYS_DEBUG("TCP packet received in ~p state: ~p", [StateName, RawData]),
+    %?SYS_DEBUG("TCP packet received in ~p state: ~p", [StateName, RawData]),
     case catch handle_received_data(RawData, State) of
         {ok, NewState} ->
             % process queued messages
@@ -251,7 +251,7 @@ handle_info({timeout, retry_connect}, connecting, State) ->
 %% Handle keep-alive timer timeout = send keep-alive message to SMSC
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
-    ?SYS_INFO("Idle connection. Sending keep-alive message", []),
+    %?SYS_DEBUG("Idle connection. Sending keep-alive message", []),
     Body = ucp_messages:create_cmd_31_body(State#state.login),
     Id = get_message_id("KAM"),
     NQ = queue:in({Id, Body}, State#state.msg_q),
@@ -364,7 +364,7 @@ enqueue_message([], Q, Ids) ->
     {ok, Q, lists:reverse(Ids)};
 enqueue_message([H|T], Q, Ids) ->
     Id = get_message_id(),
-    ?SYS_DEBUG("Enqueueing message (~s)", [Id]),
+    %?SYS_DEBUG("Enqueueing message (~s)", [Id]),
     NQ = queue:in({Id, H}, Q),
     enqueue_message(T, NQ, [Id | Ids]).
 
@@ -374,10 +374,10 @@ enqueue_message([H|T], Q, Ids) ->
 dequeue_message(State) ->
     case is_sending_allowed(State) of
         true ->
-            ?SYS_DEBUG("Dequeueing...", []),
+            %?SYS_DEBUG("Dequeueing...", []),
             case queue:out(State#state.msg_q) of
                 {{value, Message}, Q} ->
-                    ?SYS_INFO("Canceling keepalive timer", []),
+                    %?SYS_INFO("Canceling keepalive timer", []),
                     cancel_timer(State#state.keepalive_timer),
                     case process_queued_message(Message, State#state{msg_q = Q}) of
                         {_, active, NewState} ->
@@ -387,22 +387,22 @@ dequeue_message(State) ->
                     end;
                 {empty, _} ->
                     Timer = erlang:start_timer(State#state.keepalive_interval, self(), keepalive_timeout),
-                    ?SYS_INFO("Starting keepalive timer: ~p", [Timer]),
+                    %?SYS_INFO("Starting keepalive timer: ~p", [Timer]),
                     {next_state, active, State#state{keepalive_timer = Timer}}
             end;
        false ->
-            ?SYS_DEBUG("Sending not allowed...", []),
-            ?SYS_INFO("Canceling keepalive timer", []),
+            %?SYS_DEBUG("Sending not allowed...", []),
+            %?SYS_INFO("Canceling keepalive timer", []),
             cancel_timer(State#state.keepalive_timer),
             {next_state, wait_response, State}
     end.
 
 process_queued_message({Id, Body}, State) ->
-    ?SYS_INFO("Processing message (~s)", [Id]),
     case post_message(Id, Body, State) of
         {ok, NewState} ->
             {next_state, get_next_state(NewState), NewState};
-        {error, _Reason} ->
+        {error, Reason} ->
+            ?SYS_DEBUG("Error processing message (~s): ~p", [Id, Reason]),
             % Put it back on the queue and reconnect
             Q = queue:in_r({Id, Body}, State#state.msg_q),
             NewState = close_and_retry(State#state{msg_q = Q}),
@@ -463,7 +463,7 @@ post_message(MsgId, {cmd_body, CmdId, Body} = Msg, State) ->
         ok ->
             NewState = update_sending_counter(1, State),
             Timer = erlang:start_timer(?CMD_TIMEOUT, self(), {cmd_timeout, UpdatedTRN}),
-            ?SYS_INFO("Starting message (~s) timer: ~p", [MsgId, Timer]),
+            %?SYS_INFO("Starting message (~s) timer: ~p", [MsgId, Timer]),
             NewDict = dict:store(UpdatedTRN, [{Timer, MsgId, Msg}], NewState#state.dict),
             {ok, NewState#state{dict = NewDict, trn = UpdatedTRN}};
         Error -> Error
@@ -488,11 +488,12 @@ get_next_state(State) ->
 cancel_timer(undefined) ->
     ok;
 cancel_timer(Timer) ->
-    Value = erlang:cancel_timer(Timer),
-    case Value of
-        false -> ok;
-        _ -> ?SYS_DEBUG("Timer ~p canceled with value: ~p", [Timer, Value])
-    end,
+    erlang:cancel_timer(Timer),
+    %Value = erlang:cancel_timer(Timer),
+    %case Value of
+        %false -> ok;
+        %_ -> ?SYS_DEBUG("Timer ~p canceled with value: ~p", [Timer, Value])
+    %end,
     receive
         {timeout, Timer, _} ->
             ?SYS_DEBUG("Dupa",[]),
@@ -507,7 +508,7 @@ cancel_timer(Timer) ->
 handle_received_data(Data, State) ->
     case ucp_utils:decode_message(Data) of
         {ok, Message} ->
-            ?SYS_DEBUG("Processing received message: ~p", [Message]),
+            %?SYS_DEBUG("Processing received message: ~p", [Message]),
             process_message(Message, State);
         Error ->
             % Decoding failed = ignore message
@@ -531,31 +532,36 @@ process_message({#ucp_header{o_r = "R", trn = TRN}, _Body} = Data, State) ->
     end;
 process_message({#ucp_header{o_r = "O"} = Header, _Body} = Data, State) ->
     {ok, Ack} = ucp_messages:create_ack(Header),
-    ?SYS_INFO("Sending ACK message: ~p", [Ack]),
+    %?SYS_DEBUG("Sending ACK message: ~p", [Ack]),
     gen_tcp:send(State#state.socket, ucp_utils:wrap(Ack)),
     process_operation(Data, State).
 
 %%-----------------------------------------------------------------------
 %% Process result message
 %%-----------------------------------------------------------------------
-process_result(_MsgId, {#ucp_header{ot = "31"}, _Body}, State) ->
+process_result(MsgId, {#ucp_header{ot = "31"}, Body}, State) ->
     % just keepalive ack/nack - do nothing
+    log_result(MsgId, Body),
     {ok, State};
 
 process_result(MsgId, {#ucp_header{ot = "51"}, Body}, State) ->
     % message reception confirmation
-    case Body of
-        #ack{} -> % confirmed
-            ?SYS_DEBUG("Message (~s) reception acknowledged", [MsgId]);
-        #nack{} -> % rejected
-            ?SYS_DEBUG("Message (~s) reception rejected: ~p", [MsgId, Body#nack.sm])
-    end,
+    log_result(MsgId, Body),
     {ok, State};
 
-process_result(_MsgId, {#ucp_header{ot = "60"}, Body}, State) ->
+process_result(MsgId, {#ucp_header{ot = "60"}, Body}, State) ->
+    log_result(MsgId, Body),
     case Body of
         #ack{} -> {auth_ok, State};
         #nack{} -> {auth_failed, Body#nack.sm, State}
+    end.
+
+log_result(MsgId, Body) ->
+    case Body of
+        #ack{} -> % confirmed
+            ?SYS_DEBUG("Message (~s) acknowledged", [MsgId]);
+        #nack{} -> % rejected
+            ?SYS_DEBUG("Message (~s) rejected: ~p", [MsgId, Body#nack.sm])
     end.
 
 %%-----------------------------------------------------------------------
