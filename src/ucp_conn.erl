@@ -107,7 +107,7 @@ send_message(Ref, Receiver, Message, Opts) ->
 %% Shutdown connection (and process) asynchronous.
 %% --------------------------------------------------------------------
 close(Ref) ->
-    gen_fsm:send_all_state_event(Ref, close).
+    gen_fsm:sync_send_all_state_event(Ref, close).
 
 %%===================================================================
 %% gen_fsm callbacks
