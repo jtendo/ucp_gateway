@@ -184,7 +184,7 @@ handle_sync_event(get_reverse_config, _From, StateName, State) ->
 handle_sync_event(close, _From, _StateName, State) ->
     ?SYS_INFO("Closing connection request", []),
     gen_tcp:close(State#state.socket),
-    {stop, normal, State};
+    {stop, normal, ok, State};
 
 handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
