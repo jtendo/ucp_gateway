@@ -372,8 +372,9 @@ enqueue_message([], _Id, _Idx, _Cnt, Q, Ids) ->
 enqueue_message([H|T], Id, Idx, Cnt, Q, Ids) ->
     MsgId = lists:concat([Id, "#", Idx, ".", Cnt]),
     ?SYS_DEBUG("Enqueueing message (~s)", [MsgId]),
-    {cmd_body, Cmd, Body} = H,
-    NQ = queue:in({MsgId, {cmd_body, Cmd, Body#ucp_cmd_5x{ac = MsgId}}}, Q),
+    %{cmd_body, Cmd, Body} = H,
+    NQ = queue:in({MsgId, H}, Q),
+    %NQ = queue:in({MsgId, {cmd_body, Cmd, Body#ucp_cmd_5x{ac = hex:to_hexstr(MsgId)}}}, Q),
     enqueue_message(T, Id, Idx+1, Cnt, NQ, [MsgId | Ids]).
 
 %%===================================================================
