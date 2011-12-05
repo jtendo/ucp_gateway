@@ -340,33 +340,41 @@ enqueue_event(Event, From, State) ->
     enqueue_event(Event, From, State, false).
 
 enqueue_event({send_message, {Receiver, Message, Opts}}, From, State, Notify) ->
-    {ok, UpdatedCRef, Msgs} = ucp_messages:create_cmd_51_body(
-                                   State#state.cref,
-                                   State#state.default_originator,
-                                   Receiver,
-                                   Message,
-                                   Opts),
-    {ok, Q, Ids} = enqueue_message(Msgs, State#state.msg_q),
-    gen_fsm:reply(From, {ok, Ids}),
-    case Notify of
-        true -> gen_fsm:send_all_state_event(self(), dequeue);
-        _ -> ok
-    end,
-    {ok, State#state{msg_q = Q, cref = UpdatedCRef}};
+    Result = ucp_messages:create_cmd_51_body(
+                            State#state.cref,
+                            State#state.default_originator,
+                            Receiver,
+                            Message,
+                            Opts),
+    case Result of
+        {ok, UpdatedCRef, Msgs} ->
+            Id = get_message_id(),
+            {ok, Q, Ids} = enqueue_message(Msgs, Id, length(Msgs), State#state.msg_q),
+            gen_fsm:reply(From, {ok, Ids}),
+            case Notify of
+                true -> gen_fsm:send_all_state_event(self(), dequeue);
+                _ -> ok
+            end,
+            {ok, State#state{msg_q = Q, cref = UpdatedCRef}};
+        _Error ->
+            gen_fsm:reply(From, Result),
+            {ok, State}
+    end;
 enqueue_event(Event, From, State, _Notify) ->
     ?SYS_WARN("Unknown event received from ~p: ~p", [From, Event]),
     {ok, State}.
 
-enqueue_message(Msgs, Q) ->
-    enqueue_message(Msgs, Q, []).
+enqueue_message(Msgs, Id, Cnt, Q) ->
+    enqueue_message(Msgs, Id, 1, Cnt, Q, []).
 
-enqueue_message([], Q, Ids) ->
+enqueue_message([], _Id, _Idx, _Cnt, Q, Ids) ->
     {ok, Q, lists:reverse(Ids)};
-enqueue_message([H|T], Q, Ids) ->
-    Id = get_message_id(),
-    %?SYS_DEBUG("Enqueueing message (~s)", [Id]),
-    NQ = queue:in({Id, H}, Q),
-    enqueue_message(T, NQ, [Id | Ids]).
+enqueue_message([H|T], Id, Idx, Cnt, Q, Ids) ->
+    MsgId = lists:concat([Id, "#", Idx, ".", Cnt]),
+    ?SYS_DEBUG("Enqueueing message (~s)", [MsgId]),
+    {cmd_body, Cmd, Body} = H,
+    NQ = queue:in({MsgId, {cmd_body, Cmd, Body#ucp_cmd_5x{ac = MsgId}}}, Q),
+    enqueue_message(T, Id, Idx+1, Cnt, NQ, [MsgId | Ids]).
 
 %%===================================================================
 %% Handle messages from queue
