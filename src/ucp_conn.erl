@@ -138,6 +138,7 @@ init([Name, {Host, Port, Login, Password}]) ->
                             ?SENDING_WINDOW_SIZE),
                     messages_unconfirmed = 0},
     % Start connecting after timeout
+    ucp_conn_pool:join_pool(self()),
     {ok, connecting, State, 0}.
 
 connecting(timeout, State) ->
@@ -168,11 +169,6 @@ handle_event(dequeue, active, State) ->
     %?SYS_DEBUG("Handling dequeue event in active state", []),
     dequeue_message(State);
 
-handle_event(close, _StateName, State) ->
-    ?SYS_INFO("Closing connection request", []),
-    catch gen_tcp:close(State#state.socket),
-    {stop, normal, State};
-
 handle_event(Event, StateName, State) ->
     ?SYS_INFO("Unhandled event received in state ~p: ~p", [StateName, Event]),
     {next_state, StateName, State}.
@@ -184,6 +180,11 @@ handle_sync_event(get_reverse_config, _From, StateName, State) ->
     ConfLine = {State#state.name, {State#state.host, State#state.port,
                 State#state.login, State#state.pass, up}},
     {reply, {conf, ConfLine}, StateName, State};
+
+handle_sync_event(close, _From, _StateName, State) ->
+    ?SYS_INFO("Closing connection request", []),
+    gen_tcp:close(State#state.socket),
+    {stop, normal, State};
 
 handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
