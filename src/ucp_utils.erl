@@ -8,7 +8,6 @@
 -compile([debug_info]).
 
 -export([
-         append_length/1,
          to_ira/1,
          from_ira/1,
          to_7bit/1,
@@ -119,7 +118,7 @@ compose_message(Header, Body) ->
 %% Function for appending list length to beginning of the list
 %%--------------------------------------------------------------------
 append_length(Sender) ->
-    lists:concat([sender_len(Sender), Sender]).
+    sender_len(Sender)++Sender.
 
 sender_len([], Acc) ->
     hex:to_hexstr(Acc);
