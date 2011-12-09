@@ -8,6 +8,7 @@
 -compile([debug_info]).
 
 -export([
+         append_length/1,
          to_ira/1,
          from_ira/1,
          to_7bit/1,
@@ -115,15 +116,20 @@ compose_message(Header, Body) ->
     string:concat(Message, CRC).
 
 %%--------------------------------------------------------------------
-%% Function for appending list length to biggining of the list
+%% Function for appending list length to beginning of the list
 %%--------------------------------------------------------------------
-append_length(L) ->
-    Fun = fun([H|_]) -> H == $0 end,
-    {ElemsWithZero, ElemsWithOutZero} = lists:partition(Fun, L),
-    Len = length(ElemsWithOutZero)*2
-        + length(ElemsWithZero),
-    HexStr = hex:to_hexstr(Len),
-    lists:flatten([HexStr, L]).
+append_length(Sender) ->
+    lists:concat([sender_len(Sender), Sender]).
+
+sender_len([], Acc) ->
+    hex:to_hexstr(Acc);
+sender_len([First,_|Rest], Acc) when First == $0->
+    sender_len(Rest, Acc+1);
+sender_len([_,_|Rest], Acc) ->
+    sender_len(Rest, Acc+2).
+
+sender_len(Sender) ->
+    sender_len(Sender, 0).
 
 %%--------------------------------------------------------------------
 %% Function for getting 8 last significant bits of number
