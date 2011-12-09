@@ -21,6 +21,7 @@
          get_next_ref/1,
          trn_to_str/1,
          decode_message/1,
+         parse_body/2,
          wrap/1
         ]).
 
@@ -242,6 +243,41 @@ decode_message(_) ->
 %%--------------------------------------------------------------------
 parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
     case {OT, list_to_tuple(re:split(Data, "/", [{return, list}]))} of
+        {"31", {ADC, PID}} ->
+            Body = #ucp_cmd_31{adc = ADC, pid = PID},
+            {ok, {Header, Body}};
+        {"31", _} ->
+            {error, invalid_command_syntax};
+        {"60", {OADC, OTON, ONPI, STYP, PWD, NPWD, VERS, LADC, LTON, LNPI, OPID, RES1}} ->
+            Body = #ucp_cmd_60{ oadc = OADC,
+                           oton = OTON,
+                           onpi = ONPI,
+                           styp = STYP,
+                           pwd = from_ira(PWD),
+                           npwd = from_ira(NPWD),
+                           vers = VERS,
+                           ladc = LADC,
+                           lton = LTON,
+                           lnpi = LNPI,
+                           opid = OPID,
+                           res1 = RES1 },
+            {ok, {Header, Body}};
+        {"60", _} ->
+            {error, invalid_command_syntax};
+        {"51", {ADC, OADC, AC, NRQ, NADC, NT, NPID,
+             LRQ, LRAD, LPID, DD, DDT, VP, RPID, SCTS, DST, RSN, DSCTS,
+             MT, NB, MSG, MMS, PR, DCS, MCLS, RPI, CPG, RPLY, OTOA, HPLMN,
+             XSER, RES4, RES5}} ->
+             Body = #ucp_cmd_5x{adc=ADC, oadc=OADC, ac=AC, nrq=NRQ, nadc=NADC,
+                          nt=NT, npid=NPID, lrq=LRQ, lrad=LRAD, lpid=LPID,
+                          dd=DD, ddt=DDT, vp=VP, rpid=RPID, scts=SCTS,
+                          dst=DST, rsn=RSN, dscts=DSCTS, mt=MT, nb=NB,
+                          msg=MSG, mms=MMS, pr=PR, dcs=DCS, mcls=MCLS,
+                          rpi=RPI, cpg=CPG, rply=RPLY, otoa=OTOA, hplmn=HPLMN,
+                          xser=XSER, res4=RES4, res5=RES5},
+            {ok, {Header, Body}};
+        {"51", _} ->
+            {error, invalid_command_syntax};
         {"52", {ADC, OADC, AC, NRQ, NADC, NT, NPID,
              LRQ, LRAD, LPID, DD, DDT, VP, RPID, SCTS, DST, RSN, DSCTS,
              MT, NB, MSG, MMS, PR, DCS, MCLS, RPI, CPG, RPLY, OTOA, HPLMN,
@@ -254,6 +290,8 @@ parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
                           rpi=RPI, cpg=CPG, rply=RPLY, otoa=OTOA, hplmn=HPLMN,
                           xser=XSER, res4=RES4, res5=RES5},
             {ok, {Header, Body}};
+        {"52", _} ->
+            {error, invalid_command_syntax};
         {"53", {ADC, OADC, AC, NRQ, NADC, NT, NPID,
              LRQ, LRAD, LPID, DD, DDT, VP, RPID, SCTS, DST, RSN, DSCTS,
              MT, NB, MSG, MMS, PR, DCS, MCLS, RPI, CPG, RPLY, OTOA, HPLMN,
@@ -266,6 +304,8 @@ parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
                           rpi=RPI, cpg=CPG, rply=RPLY, otoa=OTOA, hplmn=HPLMN,
                           xser=XSER, res4=RES4, res5=RES5},
             {ok, {Header, Body}};
+        {"53", _} ->
+            {error, invalid_command_syntax};
         _ ->
             {error, unsupported_operation}
     end;
