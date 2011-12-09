@@ -90,7 +90,7 @@ process_cmd_51_parts(CRef, Body, [{XSer, Message}|Rest], Result) ->
 %% Form UCP 51 message
 %--------------------------------------------------------------------
 form_cmd_51_body(Body, XSer, Message) ->
-    UCPMsg = lists:flatten(hex:to_hexstr(Message)),
+    UCPMsg = hex:to_hexstr(Message),
     NB = case Body#ucp_cmd_5x.mt of
                 "4" -> integer_to_list(length(UCPMsg) * 4);
                 _ -> []
@@ -131,7 +131,7 @@ check_cmd_5x_options(_Rec, [H|_T]) ->
 %% Create body of UCP 60 - loging message
 %%--------------------------------------------------------------------
 create_cmd_60_body(Login,  Password) ->
-    IRAPassword = lists:flatten(hex:to_hexstr(ucp_utils:to_ira(Password))),
+    IRAPassword = hex:to_hexstr(ucp_utils:to_ira(Password)),
     Body = #ucp_cmd_60{
               oadc = Login,
               oton = "6",
@@ -269,7 +269,7 @@ services_to_xser(L) ->
     services_to_xser(Sorted, []).
 
 services_to_xser([], Result) ->
-    {ok, lists:flatten(hex:to_hexstr(Result))};
+    {ok, hex:to_hexstr(Result)};
 services_to_xser([{Type, {service, {Type, Len, Data}}} | Rest], Result) ->
     services_to_xser(Rest, [Type, Len, Data | Result]).
 
