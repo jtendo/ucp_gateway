@@ -31,9 +31,9 @@ hexstr_to_bin(H) ->
 hexstr_to_list(H) ->
     binary_to_list(hexstr_to_bin(H)).
 
-to_hexstr(ascii, Int) ->
+to_hexstr(ascii, Int) when is_integer(Int) ->
     string:right(integer_to_list(Int, 16), 2, $0);
 
-to_hexstr(unicode, Int) ->
+to_hexstr(unicode, Int) when is_integer(Int) ->
     string:right(integer_to_list(Int, 16), 4, $0).
 

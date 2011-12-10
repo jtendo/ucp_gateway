@@ -269,7 +269,7 @@ services_to_xser(L) ->
     services_to_xser(Sorted, []).
 
 services_to_xser([], Result) ->
-    {ok, hex:to_hexstr(Result)};
+    {ok, hex:to_hexstr(lists:flatten(Result))};
 services_to_xser([{Type, {service, {Type, Len, Data}}} | Rest], Result) ->
     services_to_xser(Rest, [Type, Len, Data | Result]).
 
