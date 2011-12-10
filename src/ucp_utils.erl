@@ -36,7 +36,6 @@
 -define(UCP_SEPARATOR, $/).
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Function for converting string to string
 %% encoded into IRA, after GSM 03.38 Version 5.3.0
@@ -53,7 +52,6 @@ from_ira(Str) ->
     lists:flatten(ASCIMessage).
 
 %%--------------------------------------------------------------------
-%% @private
 %% @doc
 %% Function for converting string to 7-bit encoding according to:
 %% GSM 03.38 Version 5.3.0
@@ -102,17 +100,23 @@ create_message(TRN, CmdId, Body) ->
 %% Function for composing whole UCP message
 %%--------------------------------------------------------------------
 compose_message(Header, Body) ->
-    HF = lists:nthtail(1, tuple_to_list(Header)),
-    BF = lists:nthtail(1, tuple_to_list(Body)),
-    Len = length(string:join(lists:concat([HF, BF]), "/")) + 3, % 3:for delimiter and CRC
+    HF = rv(Header),
+    BF = rv(Body),
+    Len = length(join(HF,BF)) + 3, % 3:for separator and CRC
     LenS = string:right(integer_to_list(Len, 10), 5, $0),
     % Update header with proper len value
-    NewHeader = Header#ucp_header{len = LenS},
-    NHF = lists:nthtail(1, tuple_to_list(NewHeader)),
+    NHF = rv(Header#ucp_header{len = LenS}),
     % Build message
-    Message = string:concat(string:join(lists:concat([NHF, BF]), "/"), "/"),
+    Message = join(NHF, BF),
     CRC = calculate_crc(Message),
-    string:concat(Message, CRC).
+    Message++CRC.
+
+rv(Record) when is_tuple(Record) ->
+    [_|Vals] = tuple_to_list(Record),
+    Vals.
+
+join(HF,BF) ->
+    string:join(HF++BF, [?UCP_SEPARATOR]) ++ [?UCP_SEPARATOR].
 
 %%--------------------------------------------------------------------
 %% Function for appending list length to beginning of the list
@@ -152,12 +156,12 @@ is_digit(_) -> false.
 %% Function for checking if String contains only digits
 %%--------------------------------------------------------------------
 has_only_digits(Str) ->
-    lists:all(fun(Elem) -> is_digit(Elem) end, Str).
+    lists:any(fun(Elem) -> not is_digit(Elem) end, Str).
 
 %%--------------------------------------------------------------------
 %% Function for spliting binary into chunks
 %%--------------------------------------------------------------------
-binary_split(Bin, Size) ->
+binary_split(Bin, Size) when is_binary(Bin), is_integer(Size) ->
     case size(Bin) =< Size of
         true ->
             [Bin];
@@ -222,10 +226,10 @@ decode_message(Msg = <<?STX, BinHeader:?UCP_HEADER_LEN/binary, _/binary>>) ->
         0 ->
             ?SYS_DEBUG("Received UCP message: ~p", [binary:bin_to_list(MsgS)]),
             HeaderList = binary:bin_to_list(BinHeader),
-            case list_to_tuple(re:split(HeaderList, "/", [{return, list}])) of
-                {TRN, LEN, OR, OT} ->
+            case string:tokens(HeaderList, [?UCP_SEPARATOR]) of
+                [TRN, LEN, OR, OT] ->
                     Header = #ucp_header{trn = TRN, len = LEN, o_r = OR, ot = OT},
-                    BodyLen = erlang:list_to_integer(LEN) - ?UCP_HEADER_LEN - ?UCP_CHECKSUM_LEN - 2,
+                    BodyLen = list_to_integer(LEN) - ?UCP_HEADER_LEN - ?UCP_CHECKSUM_LEN - 2,
                     case Msg of
                         <<?STX, _Header:?UCP_HEADER_LEN/binary, ?UCP_SEPARATOR,
                         BinBody:BodyLen/binary, ?UCP_SEPARATOR,
@@ -247,13 +251,13 @@ decode_message(_) ->
 %% Parse UCP operations
 %%--------------------------------------------------------------------
 parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
-    case {OT, list_to_tuple(re:split(Data, "/", [{return, list}]))} of
-        {"31", {ADC, PID}} ->
+    case {OT, string:tokens(Data, [?UCP_SEPARATOR])} of
+        {"31", [ADC, PID]} ->
             Body = #ucp_cmd_31{adc = ADC, pid = PID},
             {ok, {Header, Body}};
         {"31", _} ->
             {error, invalid_command_syntax};
-        {"60", {OADC, OTON, ONPI, STYP, PWD, NPWD, VERS, LADC, LTON, LNPI, OPID, RES1}} ->
+        {"60", [OADC, OTON, ONPI, STYP, PWD, NPWD, VERS, LADC, LTON, LNPI, OPID, RES1]} ->
             Body = #ucp_cmd_60{ oadc = OADC,
                            oton = OTON,
                            onpi = ONPI,
@@ -269,10 +273,10 @@ parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
             {ok, {Header, Body}};
         {"60", _} ->
             {error, invalid_command_syntax};
-        {"51", {ADC, OADC, AC, NRQ, NADC, NT, NPID,
+        {"51", [ADC, OADC, AC, NRQ, NADC, NT, NPID,
              LRQ, LRAD, LPID, DD, DDT, VP, RPID, SCTS, DST, RSN, DSCTS,
              MT, NB, MSG, MMS, PR, DCS, MCLS, RPI, CPG, RPLY, OTOA, HPLMN,
-             XSER, RES4, RES5}} ->
+             XSER, RES4, RES5]} ->
              Body = #ucp_cmd_5x{adc=ADC, oadc=OADC, ac=AC, nrq=NRQ, nadc=NADC,
                           nt=NT, npid=NPID, lrq=LRQ, lrad=LRAD, lpid=LPID,
                           dd=DD, ddt=DDT, vp=VP, rpid=RPID, scts=SCTS,
@@ -283,10 +287,10 @@ parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
             {ok, {Header, Body}};
         {"51", _} ->
             {error, invalid_command_syntax};
-        {"52", {ADC, OADC, AC, NRQ, NADC, NT, NPID,
+        {"52", [ADC, OADC, AC, NRQ, NADC, NT, NPID,
              LRQ, LRAD, LPID, DD, DDT, VP, RPID, SCTS, DST, RSN, DSCTS,
              MT, NB, MSG, MMS, PR, DCS, MCLS, RPI, CPG, RPLY, OTOA, HPLMN,
-             XSER, RES4, RES5}} ->
+             XSER, RES4, RES5]} ->
              Body = #ucp_cmd_5x{adc=ADC, oadc=OADC, ac=AC, nrq=NRQ, nadc=NADC,
                           nt=NT, npid=NPID, lrq=LRQ, lrad=LRAD, lpid=LPID,
                           dd=DD, ddt=DDT, vp=VP, rpid=RPID, scts=SCTS,
@@ -297,10 +301,10 @@ parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
             {ok, {Header, Body}};
         {"52", _} ->
             {error, invalid_command_syntax};
-        {"53", {ADC, OADC, AC, NRQ, NADC, NT, NPID,
+        {"53", [ADC, OADC, AC, NRQ, NADC, NT, NPID,
              LRQ, LRAD, LPID, DD, DDT, VP, RPID, SCTS, DST, RSN, DSCTS,
              MT, NB, MSG, MMS, PR, DCS, MCLS, RPI, CPG, RPLY, OTOA, HPLMN,
-             XSER, RES4, RES5}} ->
+             XSER, RES4, RES5]} ->
              Body = #ucp_cmd_5x{adc=ADC, oadc=OADC, ac=AC, nrq=NRQ, nadc=NADC,
                           nt=NT, npid=NPID, lrq=LRQ, lrad=LRAD, lpid=LPID,
                           dd=DD, ddt=DDT, vp=VP, rpid=RPID, scts=SCTS,
@@ -320,14 +324,14 @@ parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
 %% Parse result messages
 %%--------------------------------------------------------------------
 parse_body(Header = #ucp_header{ot = OT, o_r = "R"}, Data) ->
-    case {OT, list_to_tuple(re:split(Data, "/", [{return, list}]))} of
-        {_OT, {"A", SM}} -> % OT: 31, 60
+    case {OT, string:tokens(Data, [?UCP_SEPARATOR])} of
+        {_OT, ["A", SM]} -> % OT: 31, 60
             Body = #ack{sm = SM},
             {ok, {Header, Body}};
-        {_OT, {"A", MVP, SM}} -> % OT: 51
+        {_OT, ["A", MVP, SM]} -> % OT: 51
             Body = #ack{sm = SM, mvp = MVP},
             {ok, {Header, Body}};
-        {_OT, {"N", EC, SM}} -> % OT: 31, 51, 60
+        {_OT, ["N", EC, SM]} -> % OT: 31, 51, 60
             Body = #nack{ec = EC, sm = SM},
             {ok, {Header, Body}};
         _ ->
