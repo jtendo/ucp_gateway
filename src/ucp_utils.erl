@@ -102,21 +102,14 @@ create_message(TRN, CmdId, Body) ->
 compose_message(Header, Body) ->
     HF = rv(Header),
     BF = rv(Body),
-    Len = length(join(HF,BF)) + 3, % 3:for separator and CRC
+    Len = length(ucp_join(HF,BF)) + 3, % 3:for separator and CRC
     LenS = string:right(integer_to_list(Len, 10), 5, $0),
     % Update header with proper len value
     NHF = rv(Header#ucp_header{len = LenS}),
     % Build message
-    Message = join(NHF, BF),
+    Message = ucp_join(NHF, BF, append),
     CRC = calculate_crc(Message),
     Message++CRC.
-
-rv(Record) when is_tuple(Record) ->
-    [_|Vals] = tuple_to_list(Record),
-    Vals.
-
-join(HF,BF) ->
-    string:join(HF++BF, [?UCP_SEPARATOR]) ++ [?UCP_SEPARATOR].
 
 %%--------------------------------------------------------------------
 %% Function for appending list length to beginning of the list
@@ -226,7 +219,7 @@ decode_message(Msg = <<?STX, BinHeader:?UCP_HEADER_LEN/binary, _/binary>>) ->
         0 ->
             ?SYS_DEBUG("Received UCP message: ~p", [binary:bin_to_list(MsgS)]),
             HeaderList = binary:bin_to_list(BinHeader),
-            case string:tokens(HeaderList, [?UCP_SEPARATOR]) of
+            case ucp_split(HeaderList) of
                 [TRN, LEN, OR, OT] ->
                     Header = #ucp_header{trn = TRN, len = LEN, o_r = OR, ot = OT},
                     BodyLen = list_to_integer(LEN) - ?UCP_HEADER_LEN - ?UCP_CHECKSUM_LEN - 2,
@@ -251,7 +244,7 @@ decode_message(_) ->
 %% Parse UCP operations
 %%--------------------------------------------------------------------
 parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
-    case {OT, string:tokens(Data, [?UCP_SEPARATOR])} of
+    case {OT, ucp_split(Data)} of
         {"31", [ADC, PID]} ->
             Body = #ucp_cmd_31{adc = ADC, pid = PID},
             {ok, {Header, Body}};
@@ -324,7 +317,7 @@ parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
 %% Parse result messages
 %%--------------------------------------------------------------------
 parse_body(Header = #ucp_header{ot = OT, o_r = "R"}, Data) ->
-    case {OT, string:tokens(Data, [?UCP_SEPARATOR])} of
+    case {OT, ucp_split(Data)} of
         {_OT, ["A", SM]} -> % OT: 31, 60
             Body = #ack{sm = SM},
             {ok, {Header, Body}};
@@ -341,6 +334,22 @@ parse_body(Header = #ucp_header{ot = OT, o_r = "R"}, Data) ->
 parse_body(_Header, _Body) ->
     {error, unsupported_operation}.
 
+
+%%--------------------------------------------------------------------
+%% Utility functions
+%%--------------------------------------------------------------------
+
 wrap(Message) ->
     binary:list_to_bin([?STX, Message, ?ETX]).
 
+rv(Record) when is_tuple(Record) ->
+    [_|Vals] = tuple_to_list(Record),
+    Vals.
+
+ucp_join(L1, L2) ->
+    string:join(L1++L2, [?UCP_SEPARATOR]).
+ucp_join(L1, L2, append) ->
+    ucp_join(L1,L2) ++ [?UCP_SEPARATOR].
+
+ucp_split(L) ->
+    re:split(L, [?UCP_SEPARATOR], [{return,list}]).
