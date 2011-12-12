@@ -13,7 +13,6 @@
                   confetti
                  ]},
   {modules, [
-          hex,
           ucp_gateway,
           ucp_gateway_sup,
           ucp_conn,
