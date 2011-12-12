@@ -30,8 +30,9 @@ encode_sender_test() ->
     ?assertEqual({"5039", "106F79D87D2EBBE06C"}, ucp_utils:encode_sender("orange.pl")),
     ?assertEqual("orange.pl", ucp_utils:decode_sender("5039", "106F79D87D2EBBE06C")),
     ?assertEqual("11112376382900", ucp_utils:decode_sender(whatever, "11112376382900")),
-    ?assertEqual("2521E08854F29A54A854ABB7DA76F7FD978BA503",
-        ucp_utils:encode_sender("!@#$%^&*()-=+[]{}\/.,:")),
-    ?assertEqual({"5039", "!@#$%^&*()-=+[]{}\/.,:"}, ucp_utils:decode_sender("2521E08854F29A54A854ABB7DA76F7FD978BA503")).
+    ?assertEqual({"5039", "2721E08854F29A54A854ABB7DA76F77DEECBC5D201"},
+        ucp_utils:encode_sender("!@#$%^&*()-=+[]{}\\/.,:")),
+    ?assertEqual("!@#$%^&*()-=+[]{}\\/.,:", ucp_utils:decode_sender("5039",
+        "2721E08854F29A54A854ABB7DA76F77DEECBC5D201")).
 
 
