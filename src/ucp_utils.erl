@@ -5,11 +5,11 @@
 -include("ucp_syntax.hrl").
 -include("logger.hrl").
 
--compile([debug_info]).
+-ifdef(TEST).
+-compile([export_all]).
+-endif.
 
 -export([
-         to_ira/1,
-         from_ira/1,
          to_7bit/1,
          encode_sender/1,
          decode_sender/2,
@@ -37,22 +37,6 @@
 
 %%--------------------------------------------------------------------
 %% @doc
-%% Function for converting string to string
-%% encoded into IRA, after GSM 03.38 Version 5.3.0
-%%
-%% @spec to_ira(Str) -> String
-%% @end
-%%--------------------------------------------------------------------
-to_ira(Str) ->
-    GsmMessage = lists:map(fun(X) -> ucp_ia5:ascii_to_gsm(X) end, Str),
-    lists:flatten(GsmMessage).
-
-from_ira(Str) ->
-    ASCIMessage = lists:map(fun(X) -> ucp_ia5:gsm_to_ascii(X) end, Str),
-    lists:flatten(ASCIMessage).
-
-%%--------------------------------------------------------------------
-%% @doc
 %% Function for converting string to 7-bit encoding according to:
 %% GSM 03.38 Version 5.3.0
 %%
@@ -65,25 +49,23 @@ to_7bit(Str) -> binary:bin_to_list(ucp_7bit:to_7bit(Str)).
 %% Function for calculating UCP OAdC field for string and returns list
 %%--------------------------------------------------------------------
 encode_sender(Sender) ->
-    % TODO: detect international numer and set OTOA: 1139
+    % TODO: detect international number and set OTOA: 1139
     case has_only_digits(Sender) of
         true ->
             {"", Sender};
         false ->
             {"5039", append_length(
                         hex:to_hexstr(
-                           to_7bit(
-                              to_ira(Sender))))}
+                           to_7bit(ucp_ira:to(ira, Sender))))}
     end.
 
 decode_sender(OTOA, OAdC) ->
     case OTOA of
         "5039" ->
-           % Cut off sender length
-           from_ira(
-              ucp_7bit:from_7bit(
-                 hex:hexstr_to_list(
-                    string:substr(OAdC, 3))));
+           [_,_|Sender] = OAdC,
+           ucp_ira:to(ascii,
+               ucp_7bit:from_7bit(
+                   hex:hexstr_to_bin(Sender)));
         _Other ->
            OAdC
     end.
@@ -142,7 +124,7 @@ calculate_crc(Data) when is_list(Data) ->
 %%--------------------------------------------------------------------
 %% Function for checking if Char is digit
 %%--------------------------------------------------------------------
-is_digit(C) when C > 46, C < 58  -> true;
+is_digit(C) when C > 47, C < 58  -> true;
 is_digit(_) -> false.
 
 %%--------------------------------------------------------------------
@@ -255,8 +237,8 @@ parse_body(Header = #ucp_header{ot = OT, o_r = "O"}, Data) ->
                            oton = OTON,
                            onpi = ONPI,
                            styp = STYP,
-                           pwd = from_ira(PWD),
-                           npwd = from_ira(NPWD),
+                           pwd = ucp_ira:to(ascii, PWD),
+                           npwd = ucp_ira:to(ascii, NPWD),
                            vers = VERS,
                            ladc = LADC,
                            lton = LTON,

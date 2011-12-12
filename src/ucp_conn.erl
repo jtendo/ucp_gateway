@@ -602,7 +602,7 @@ process_operation({#ucp_header{ot = "52"}, Body}, State) ->
     {ok, State};
 
 process_operation({#ucp_header{ot = "53"}, Body}, State) ->
-    Info = hex:hexstr_to_list(ucp_utils:from_ira(Body#ucp_cmd_5x.msg)),
+    Info = hex:hexstr_to_list(ucp_ira:to(ascii, Body#ucp_cmd_5x.msg)),
     ?SYS_INFO("Received delivery report message: ~p", [Info]),
     {ok, State};
 
