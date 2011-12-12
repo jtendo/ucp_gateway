@@ -22,7 +22,7 @@
           ucp_conn_retry,
           ucp_smspp,
           ucp_7bit,
-          ucp_ia5,
+          ucp_ira,
           ucp_messages,
           ucp_utils,
           ucp_event,

@@ -25,6 +25,10 @@
          wrap/1
         ]).
 
+-export([to_hexstr/1,
+         hexstr_to_bin/1,
+         hexstr_to_list/1]).
+
 -define(STX, 16#02).
 -define(ETX, 16#03).
 -define(MIN_MESSAGE_TRN, 0).
@@ -55,8 +59,7 @@ encode_sender(Sender) ->
             {"", Sender};
         false ->
             {"5039", append_length(
-                        hex:to_hexstr(
-                           to_7bit(ucp_ira:to(ira, Sender))))}
+                    to_hexstr(to_7bit(ucp_ira:to(ira, Sender))))}
     end.
 
 decode_sender(OTOA, OAdC) ->
@@ -64,8 +67,7 @@ decode_sender(OTOA, OAdC) ->
         "5039" ->
            [_,_|Sender] = OAdC,
            ucp_ira:to(ascii,
-               ucp_7bit:from_7bit(
-                   hex:hexstr_to_bin(Sender)));
+               ucp_7bit:from_7bit(hexstr_to_bin(Sender)));
         _Other ->
            OAdC
     end.
@@ -100,7 +102,7 @@ append_length(Sender) ->
     sender_len(Sender)++Sender.
 
 sender_len([], Acc) ->
-    hex:to_hexstr(Acc);
+    to_hexstr(Acc);
 sender_len([First,_|Rest], Acc) when First == $0->
     sender_len(Rest, Acc+1);
 sender_len([_,_|Rest], Acc) ->
@@ -159,9 +161,9 @@ binary_split(Bin, Size, ChunkNo, Acc)->
     end.
 
 pad_to(Width, Binary) ->
-     case (Width - size(Binary) rem Width) rem Width
-       of 0 -> Binary
-        ; N -> <<Binary/binary, 0:(N*8)>>
+     case (Width - size(Binary) rem Width) rem Width of
+        0 -> Binary;
+        N -> <<Binary/binary, 0:(N*8)>>
      end.
 
 %%--------------------------------------------------------------------
@@ -335,3 +337,39 @@ ucp_join(L1, L2, append) ->
 
 ucp_split(L) ->
     re:split(L, [?UCP_SEPARATOR], [{return,list}]).
+
+%%--------------------------------------------------------------------
+%% Hex mangling utils
+%%--------------------------------------------------------------------
+
+to_hexstr(Bin) when is_binary(Bin) ->
+    to_hexstr(binary_to_list(Bin));
+
+to_hexstr(Int) when is_integer(Int) andalso Int > 255 ->
+    to_hexstr(unicode, Int);
+
+to_hexstr(Int) when is_integer(Int) ->
+    to_hexstr(ascii, Int);
+
+to_hexstr(L) when is_list(L) ->
+    Type = case lists:any(fun(X) when X > 255 ->
+                    true;
+                   (_) ->
+                    false
+                   end, L) of
+              true -> unicode;
+              false -> ascii
+          end,
+    lists:flatten([to_hexstr(Type, X) || X <- L]).
+
+hexstr_to_bin(H) ->
+    <<<<(erlang:list_to_integer([X], 16)):4>> || X <- H>>.
+
+hexstr_to_list(H) ->
+    binary_to_list(hexstr_to_bin(H)).
+
+to_hexstr(ascii, Int) when is_integer(Int) ->
+    string:right(integer_to_list(Int, 16), 2, $0);
+
+to_hexstr(unicode, Int) when is_integer(Int) ->
+    string:right(integer_to_list(Int, 16), 4, $0).

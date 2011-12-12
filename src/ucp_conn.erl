@@ -391,7 +391,7 @@ enqueue_message([H|T], Id, Idx, Cnt, Q, Ids) ->
     ?SYS_DEBUG("Enqueueing message (~s)", [MsgId]),
     %{cmd_body, Cmd, Body} = H,
     NQ = queue:in({MsgId, H}, Q),
-    %NQ = queue:in({MsgId, {cmd_body, Cmd, Body#ucp_cmd_5x{ac = hex:to_hexstr(MsgId)}}}, Q),
+    %NQ = queue:in({MsgId, {cmd_body, Cmd, Body#ucp_cmd_5x{ac = ucp_utils:to_hexstr(MsgId)}}}, Q),
     enqueue_message(T, Id, Idx+1, Cnt, NQ, [MsgId | Ids]).
 
 %%===================================================================
@@ -602,7 +602,7 @@ process_operation({#ucp_header{ot = "52"}, Body}, State) ->
     {ok, State};
 
 process_operation({#ucp_header{ot = "53"}, Body}, State) ->
-    Info = hex:hexstr_to_list(ucp_ira:to(ascii, Body#ucp_cmd_5x.msg)),
+    Info = ucp_utils:hexstr_to_list(ucp_ira:to(ascii, Body#ucp_cmd_5x.msg)),
     ?SYS_INFO("Received delivery report message: ~p", [Info]),
     {ok, State};
 

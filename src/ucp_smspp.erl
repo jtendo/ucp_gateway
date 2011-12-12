@@ -27,7 +27,7 @@ create_tpud(CNTR_VAL, Data) when is_binary(Data),
     SP = get_sim_profile(),
     TAR = ?CFG(tar, sim_profile_conf, <<>>),
     ?SYS_DEBUG("SIM           ~p~n", [SP]),
-    ?SYS_DEBUG("TAR           ~p~n", [hex:to_hexstr(TAR)]),
+    ?SYS_DEBUG("TAR           ~p~n", [ucp_utils:to_hexstr(TAR)]),
     create_tpud(SP, TAR, CNTR_VAL, Data).
 
 
@@ -56,45 +56,45 @@ create_tpud(SP, TAR, CNTR_VAL, Data) when is_record(SP, sim_profile),
     {cc, {CC_TYPE, CC_SIZE}, cntr, IS_CNTR, enc, IS_ENC} = analyze_spi(SP#sim_profile.spi),
 
     CNTR = calculate_cntr(IS_CNTR, CNTR_VAL),
-    ?SYS_DEBUG("CNTR          ~p~n", [hex:to_hexstr(CNTR)]),
+    ?SYS_DEBUG("CNTR          ~p~n", [ucp_utils:to_hexstr(CNTR)]),
 
-    ?SYS_DEBUG("KIC           ~p,~p,~p,~n",[hex:to_hexstr(KIC), KIC, analyze_kic(KIC)]),
-    ?SYS_DEBUG("KID           ~p,~p,~p,~n",[hex:to_hexstr(KID), KID, analyze_kid(KID)]),
-    ?SYS_DEBUG("SPI           ~p, ~p~n", [hex:to_hexstr(SPI), analyze_spi(SPI)]),
+    ?SYS_DEBUG("KIC           ~p,~p,~p,~n",[ucp_utils:to_hexstr(KIC), KIC, analyze_kic(KIC)]),
+    ?SYS_DEBUG("KID           ~p,~p,~p,~n",[ucp_utils:to_hexstr(KID), KID, analyze_kid(KID)]),
+    ?SYS_DEBUG("SPI           ~p, ~p~n", [ucp_utils:to_hexstr(SPI), analyze_spi(SPI)]),
     case IS_ENC of
         noenc->
             PCNTR = <<0>>,
             RC_CC_DS = <<>>,
-            ?SYS_DEBUG("PCNTR         ~p~n", [hex:to_hexstr(PCNTR)]),
-            ?SYS_DEBUG("CC            ~p~n", [hex:to_hexstr(RC_CC_DS)]),
+            ?SYS_DEBUG("PCNTR         ~p~n", [ucp_utils:to_hexstr(PCNTR)]),
+            ?SYS_DEBUG("CC            ~p~n", [ucp_utils:to_hexstr(RC_CC_DS)]),
 
             CHL = size(ConstPart) + size(CNTR)  + size(RC_CC_DS) + size(PCNTR),
             CPL = size(ConstPart) + size(CNTR) + size(PCNTR) + size(<<CHL>>) + size(Data),
-            ?SYS_DEBUG("CHL           ~p,~p~n", [CHL, hex:to_hexstr(CHL)]),
-            ?SYS_DEBUG("CPL           ~p,~p~n", [CPL, hex:to_hexstr(CPL)]),
+            ?SYS_DEBUG("CHL           ~p,~p~n", [CHL, ucp_utils:to_hexstr(CHL)]),
+            ?SYS_DEBUG("CPL           ~p,~p~n", [CPL, ucp_utils:to_hexstr(CPL)]),
 
             DataToSend = <<CNTR/binary, PCNTR/binary, Data/binary>>,
-            ?SYS_DEBUG("DATA          ~p~n", [hex:to_hexstr(DataToSend)]),
+            ?SYS_DEBUG("DATA          ~p~n", [ucp_utils:to_hexstr(DataToSend)]),
             Ret = << CPL:16, CHL:8, ConstPart/binary, DataToSend/binary >>;
         enc ->
             SizeOfDataToCrypt = size(Data) + size(CNTR) + CC_SIZE + 1, %% +1 for PCNTR
 
             PCNTR = prepare_pcntr(SizeOfDataToCrypt),
-            ?SYS_DEBUG("PCNTR         ~p,~p~n", [PCNTR, hex:to_hexstr(PCNTR)]),
+            ?SYS_DEBUG("PCNTR         ~p,~p~n", [PCNTR, ucp_utils:to_hexstr(PCNTR)]),
 
             CHL = size(ConstPart) + size(CNTR) + size(<<PCNTR>>) + CC_SIZE,
             CPL = size(ConstPart) + SizeOfDataToCrypt + PCNTR + size(<<CHL>>),
-            ?SYS_DEBUG("CHL           ~p,~p~n", [CHL, hex:to_hexstr(CHL)]),
-            ?SYS_DEBUG("CPL           ~p,~p~n", [CPL, hex:to_hexstr(CPL)]),
+            ?SYS_DEBUG("CHL           ~p,~p~n", [CHL, ucp_utils:to_hexstr(CHL)]),
+            ?SYS_DEBUG("CPL           ~p,~p~n", [CPL, ucp_utils:to_hexstr(CPL)]),
 
             ToCC_nopadding = <<CPL:16, CHL:8, ConstPart/binary, CNTR/binary, PCNTR:8, Data/binary, 0:(PCNTR*8)>>,
             ToCC = ucp_utils:pad_to(8,ToCC_nopadding),
             RC_CC_DS = prepare_cc(CC_TYPE, SP, ToCC),
-            ?SYS_DEBUG("CC            ~p~n", [hex:to_hexstr(RC_CC_DS)]),
+            ?SYS_DEBUG("CC            ~p~n", [ucp_utils:to_hexstr(RC_CC_DS)]),
 
             ToCrypt = <<CNTR/binary, PCNTR:8, RC_CC_DS/binary, Data/binary>>,
             DataToSend = crypt_data(analyze_kic(KIC), SP, ToCrypt),
-            ?SYS_DEBUG("DATA          ~p~n", [hex:to_hexstr(DataToSend)]),
+            ?SYS_DEBUG("DATA          ~p~n", [ucp_utils:to_hexstr(DataToSend)]),
             Ret = << CPL:16, CHL:8, ConstPart/binary, DataToSend/binary >>
     end,
     {data, Ret}.
@@ -190,7 +190,7 @@ prepare_cc(nocc, _SP, _Data) ->
 prepare_cc(rc, _SP, _Data) ->
     <<>>;
 prepare_cc(cc, SP, Data) ->
-    KidKey = hex:hexstr_to_bin(SP#sim_profile.kidkey),
+    KidKey = ucp_utils:hexstr_to_bin(SP#sim_profile.kidkey),
     [Key1, Key2] = ucp_utils:binary_split(KidKey, 8),
     calculate_cc(
       Key1,
@@ -308,12 +308,12 @@ analyze_kid(KID) ->
 %%--------------------------------------------------------------------
 
 crypt_data(tripledes2key, SP, Data) ->
-    KicKey = hex:hexstr_to_bin(SP#sim_profile.kickey),
+    KicKey = ucp_utils:hexstr_to_bin(SP#sim_profile.kickey),
     [Key1, Key2] = ucp_utils:binary_split(KicKey, 8),
     crypto:des3_cbc_encrypt(Key1, Key2, Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data));
 
 crypt_data(tripledes3key, SP, Data) ->
-    KicKey = hex:hexstr_to_bin(SP#sim_profile.kickey),
+    KicKey = ucp_utils:hexstr_to_bin(SP#sim_profile.kickey),
     [Key1, Key2, Key3] = ucp_utils:binary_split(KicKey, 8),
     crypto:des3_cbc_encrypt(Key1, Key2, Key3, ?ZERO_IV, ucp_utils:pad_to(8,Data));
 
@@ -333,12 +333,12 @@ crypt_data(des_cbc, SP, Data) ->
 %%--------------------------------------------------------------------
 
 decrypt_data(tripledes2key, SP, Data) ->
-    KicKey = hex:hexstr_to_bin(SP#sim_profile.kickey),
+    KicKey = ucp_utils:hexstr_to_bin(SP#sim_profile.kickey),
     [Key1, Key2] = ucp_utils:binary_split(KicKey, 8),
     crypto:des3_cbc_decrypt(Key1, Key2, Key1, ?ZERO_IV, ucp_utils:pad_to(8,Data));
 
 decrypt_data(tripledes3key, SP, Data) ->
-    KicKey = hex:hexstr_to_bin(SP#sim_profile.kickey),
+    KicKey = ucp_utils:hexstr_to_bin(SP#sim_profile.kickey),
     [Key1, Key2, Key3] = ucp_utils:binary_split(KicKey, 8),
     crypto:des3_cbc_decrypt(Key1, Key2, Key3, ?ZERO_IV, ucp_utils:pad_to(8,Data));
 
@@ -358,25 +358,25 @@ decrypt_data(des_cbc, SP, Data) ->
 
 parse_0348packet(Packet) when is_list(Packet)->
     SP = get_sim_profile(),
-    parse_0348packet(SP, hex:hexstr_to_bin(Packet));
+    parse_0348packet(SP, ucp_utils:hexstr_to_bin(Packet));
 
 parse_0348packet(Packet) when is_binary(Packet)->
     SP = get_sim_profile(),
     parse_0348packet(SP, Packet).
 
 %parse_0348packet(SP, Packet) when is_list(Packet)->
-%    parse_0348packet(SP, hex:hexstr_to_bin(Packet));
+%    parse_0348packet(SP, ucp_utils:hexstr_to_bin(Packet));
 
 parse_0348packet(SP, Packet) when is_binary(Packet)->
     <<CPI:8, CPL:8, CHL:8, SPIA:8, SPIB:8, KIC:8, KID:8, TAR:24, Rest/binary>> = Packet,
-    ?SYS_DEBUG("CPI                  ~p,~p~n",[hex:to_hexstr(CPI), CPI]),
-    ?SYS_DEBUG("CPL                  ~p,~p~n",[hex:to_hexstr(CPL), CPL]),
-    ?SYS_DEBUG("CHL                  ~p,~p~n",[hex:to_hexstr(CHL), CHL]),
-    ?SYS_DEBUG("SPIA                 ~p,~p~n",[hex:to_hexstr(SPIA), SPIA]),
-    ?SYS_DEBUG("SPIB                 ~p,~p~n",[hex:to_hexstr(SPIB), SPIB]),
-    ?SYS_DEBUG("KIC                  ~p,~p,~p,~n",[hex:to_hexstr(KIC), KIC, analyze_kic(<<KIC>>)]),
-    ?SYS_DEBUG("KID                  ~p,~p,~p,~n",[hex:to_hexstr(KID), KID, analyze_kid(<<KID>>)]),
-    ?SYS_DEBUG("TAR                  ~p,~p~n",[hex:to_hexstr(TAR), TAR]),
+    ?SYS_DEBUG("CPI                  ~p,~p~n",[ucp_utils:to_hexstr(CPI), CPI]),
+    ?SYS_DEBUG("CPL                  ~p,~p~n",[ucp_utils:to_hexstr(CPL), CPL]),
+    ?SYS_DEBUG("CHL                  ~p,~p~n",[ucp_utils:to_hexstr(CHL), CHL]),
+    ?SYS_DEBUG("SPIA                 ~p,~p~n",[ucp_utils:to_hexstr(SPIA), SPIA]),
+    ?SYS_DEBUG("SPIB                 ~p,~p~n",[ucp_utils:to_hexstr(SPIB), SPIB]),
+    ?SYS_DEBUG("KIC                  ~p,~p,~p,~n",[ucp_utils:to_hexstr(KIC), KIC, analyze_kic(<<KIC>>)]),
+    ?SYS_DEBUG("KID                  ~p,~p,~p,~n",[ucp_utils:to_hexstr(KID), KID, analyze_kid(<<KID>>)]),
+    ?SYS_DEBUG("TAR                  ~p,~p~n",[ucp_utils:to_hexstr(TAR), TAR]),
     {cc, {CC_TYPE, CC_SIZE}, cntr, IS_CNTR, enc, IS_ENC} = analyze_spi(<<SPIA:8, SPIB:8>>),
     ?SYS_DEBUG("CC_TYPE              ~p~n",[CC_TYPE]),
     ?SYS_DEBUG("CC_SIZE              ~p~n",[CC_SIZE]),
