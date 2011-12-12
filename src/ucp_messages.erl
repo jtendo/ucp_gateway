@@ -131,7 +131,7 @@ check_cmd_5x_options(_Rec, [H|_T]) ->
 %% Create body of UCP 60 - loging message
 %%--------------------------------------------------------------------
 create_cmd_60_body(Login,  Password) ->
-    IRAPassword = hex:to_hexstr(ucp_utils:to_ira(Password)),
+    IRAPassword = hex:to_hexstr(ucp_ira:to(ira, Password)),
     Body = #ucp_cmd_60{
               oadc = Login,
               oton = "6",
