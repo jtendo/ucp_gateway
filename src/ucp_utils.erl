@@ -149,7 +149,7 @@ is_digit(_) -> false.
 %% Function for checking if String contains only digits
 %%--------------------------------------------------------------------
 has_only_digits(Str) ->
-    lists:any(fun(Elem) -> not is_digit(Elem) end, Str).
+    lists:all(fun(Elem) ->is_digit(Elem) end, Str).
 
 %%--------------------------------------------------------------------
 %% Function for spliting binary into chunks
