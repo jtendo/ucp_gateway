@@ -3,9 +3,11 @@ Erlang UCP Gateway
 
 Project status
 --------------
+Actually it's more of a SMSC client than a real gateway at the moment.
 
 Tested with SMSC LogicaCMG's EMI/UCP interface 4.6
 
+If you like this project, you might also be interested in [jtendo UCP Simulator](https://github.com/jtendo/ucp_simulator)
 
 Usage
 -----
