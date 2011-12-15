@@ -58,7 +58,7 @@ Usage
     attach() ->
         ucp_event:add_handler(?MODULE).
         
-    handle_event({sms, {Recipient, Sender, Data} = Msg}, State) ->
+    handle_event({sms, Msg = {Recipient, Sender, Data}}, State) ->
         io:format("Received: ~p~n", [Msg]),
         {ok, State};
         
