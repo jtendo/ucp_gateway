@@ -522,7 +522,6 @@ cancel_timer(Timer) ->
     %end,
     receive
         {timeout, Timer, _} ->
-            ?SYS_DEBUG("Dupa",[]),
             ok
     after 0 ->
             ok
