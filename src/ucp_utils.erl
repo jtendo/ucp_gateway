@@ -22,7 +22,8 @@
          trn_to_str/1,
          decode_message/1,
          parse_body/2,
-         wrap/1
+         wrap/1,
+         encode_reverse/1
         ]).
 
 -export([to_hexstr/1,
@@ -373,3 +374,17 @@ to_hexstr(ascii, Int) when is_integer(Int) ->
 
 to_hexstr(unicode, Int) when is_integer(Int) ->
     string:right(integer_to_list(Int, 16), 4, $0).
+
+%%--------------------------------------------------------------------
+%% Reverse nibble encoding
+%%--------------------------------------------------------------------
+encode_reverse(L) ->
+    encode_reverse(L, []).
+
+encode_reverse([], Acc) ->
+    lists:reverse(Acc);
+encode_reverse([A|[]], Acc) ->
+    encode_reverse([], [$F, A | Acc]);
+encode_reverse([A, B|T], Acc) ->
+    encode_reverse(T, [A, B | Acc]).
+
