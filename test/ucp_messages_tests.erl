@@ -124,9 +124,3 @@ message_too_long_test() ->
     R = ucp_messages:split_message(0, "", <<0:(537*8)>>),
     ?assertMatch({error, message_too_long}, R).
 
-message_options_test() ->
-    Body = #ucp_cmd_5x{},
-    % unknown option
-    ?assertMatch({error, unknown_option},
-        ucp_messages:check_cmd_5x_options(Body, [{test, 0}])),
-    ok.
