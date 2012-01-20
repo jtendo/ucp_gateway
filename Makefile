@@ -18,6 +18,5 @@ clean:
 	-rm -rf deps ebin doc/* .eunit
 
 run: all
-	#@erl -pa deps/*/ebin -pa ebin -s lager -s ucp_simulator start
-	@erl -pa ebin -s ucp_gateway start
+	@erl -pa ebin -pa deps/*/ebin -boot start_sasl -s confetti_app -s lager -s ucp_gateway start
 
