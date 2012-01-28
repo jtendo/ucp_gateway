@@ -13,7 +13,7 @@
 %%     wait_reply - sent command and waiting for reply
 %%----------------------------------------------------------------------
 
--include("ucp_syntax.hrl").
+-include_lib("ucp_common/include/ucp_syntax.hrl").
 -include("logger.hrl").
 -include("utils.hrl").
 
