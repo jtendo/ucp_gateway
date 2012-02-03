@@ -10,6 +10,8 @@
          create_cmd_60_body/2,
          create_ack/1]).
 
+-export([services_to_xser/1]).
+
 -define(BIN_BODY_MAX_SIZE, 140).
 -define(UDH_CONCAT_IE_SIZE, 5).
 -define(STK_IE, 16#70).
@@ -28,44 +30,40 @@
 create_cmd_51_body(CRef, Sender, Receiver, Message) ->
     create_cmd_51_body(CRef, Sender, Receiver, Message, []).
 
-create_cmd_51_body(CRef, Sender, Receiver, Message, Options) when is_binary(Message) ->
+create_cmd_51_body(CRef, Sender, Receiver, Message, Options) ->
     % TODO: Check max sender len. 16
     {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
     TempBody = #ucp_cmd_5x{
               oadc = UCPSender,
               adc = Receiver,
-              otoa = OTOA,
-              rpid = "0127",
-              mcls = "2", %% class message 2
-              mt = "4",
-              xser = "01030270000201F60D0101",
-              pr = "0"},
-    case check_cmd_5x_options(TempBody, Options) of
+              otoa = OTOA},
+    UpdOptions = check_msg_type(Message, Options),
+    UpdMessage = convert_msg(Message),
+    case process_cmd_5x_options(TempBody, UpdOptions) of
         {ok, Body} ->
-            check_cmd_5x_splitting(CRef, Body, Message, Options);
-        Error ->
-            Error
-    end;
-
-create_cmd_51_body(CRef, Sender, Receiver, Message, Options) when is_list(Message) ->
-    % Check max sender len. 16
-    {OTOA, UCPSender} = ucp_utils:encode_sender(Sender),
-    {XSer, MT, ConvMessage} = case unicode:bin_is_7bit(unicode:characters_to_binary(Message)) of
-        true -> {"", "3", Message};
-        false -> {"020108", "4", unicode:characters_to_list(Message)}
-    end,
-    TempBody = #ucp_cmd_5x{
-                  oadc = UCPSender,
-                  adc = Receiver,
-                  otoa = OTOA,
-                  mt = MT,
-                  xser = XSer},
-    case check_cmd_5x_options(TempBody, Options) of
-        {ok, Body} ->
-            check_cmd_5x_splitting(CRef, Body, ConvMessage, Options);
+            check_cmd_5x_splitting(CRef, Body, UpdMessage, UpdOptions);
         Error ->
             Error
     end.
+
+check_msg_type(Message, Options) ->
+    case proplists:is_defined(message_type, Options) of
+        true -> Options;
+        false -> [{message_type, detect_msg_type(Message)} | Options]
+    end.
+
+detect_msg_type(Message) when is_binary(Message) ->
+    binary;
+detect_msg_type(Message) when is_list(Message) ->
+    text.
+
+convert_msg(Message) when is_binary(Message) ->
+    Message;
+convert_msg(Message) when is_list(Message) ->
+    % TODO: convert unicode lists
+    % if unicode:bin_is_7bit(unicode:characters_to_binary(Message))
+    % unicode:characters_to_list(Message)
+    erlang:list_to_binary(Message).
 
 check_cmd_5x_splitting(CRef, Body, Message, Options) ->
     % Check spitting option
@@ -90,7 +88,7 @@ process_cmd_51_parts(CRef, Body, [{XSer, Message}|Rest], Result) ->
 %% Form UCP 51 message
 %--------------------------------------------------------------------
 form_cmd_51_body(Body, XSer, Message) ->
-    UCPMsg = ucp_utils:to_hexstr(Message),
+    UCPMsg = lists:flatten(ucp_utils:to_hexstr(Message)),
     NB = case Body#ucp_cmd_5x.mt of
                 "4" -> integer_to_list(length(UCPMsg) * 4);
                 _ -> []
@@ -105,33 +103,95 @@ form_cmd_51_body(Body, XSer, Message) ->
 %% Function checks ucp_cmd_5x options
 %%--------------------------------------------------------------------
 % 5x messages common options handling
-check_cmd_5x_options(Rec, []) ->
+process_cmd_5x_options(Rec, Opts) ->
+    process_cmd_5x_options(Rec, Opts, Opts).
+
+process_cmd_5x_options(Rec, _Opts, []) ->
     {ok, Rec};
-check_cmd_5x_options(Rec, [{split, _}|T]) ->
+process_cmd_5x_options(Rec, Opts, [{split, _}|T]) ->
     % pass through
-    check_cmd_5x_options(Rec, T);
-check_cmd_5x_options(Rec, [{notification_request, Bool}|T])
-  when Bool == true ->
-    check_cmd_5x_options(Rec#ucp_cmd_5x{nrq = "1", npid = "0539", nt = "3"}, T);
-check_cmd_5x_options(Rec, [{notification_type, Type}|T])
-  when is_integer(Type); Type =< 0; Type =< 7 ->
-    % TODO: fix NT override when notification_request option used after
-    check_cmd_5x_options(Rec#ucp_cmd_5x{nt = integer_to_list(Type)}, T);
-check_cmd_5x_options(Rec, [{validity_period, Value}|T]) % DDMMYYHHmm
-  when is_list(Value); length(Value) =:= 10 ->
-    check_cmd_5x_options(Rec#ucp_cmd_5x{vp = Value}, T);
-check_cmd_5x_options(Rec, [{deferred_delivery_time, Value}|T]) % DDMMYYHHmm
-  when is_list(Value); length(Value) =:= 10 ->
-    check_cmd_5x_options(Rec#ucp_cmd_5x{dd = "1", ddt = Value}, T);
-check_cmd_5x_options(_Rec, [H|_T]) ->
-    ?SYS_WARN("Unknown option or value: ~p", [H]),
-    {error, unknown_option}.
+    process_cmd_5x_options(Rec, Opts, T);
+process_cmd_5x_options(Rec, Opts, [{notification_request, Value}|T])
+  when is_boolean(Value) ->
+    case Value of
+        true ->
+            NewRec = case proplists:get_value(notification_type, Opts) of
+                        undefined ->
+                            % Set default notification type when not specified
+                            Rec#ucp_cmd_5x{nt = "3"};
+                        _ ->
+                            Rec
+                     end,
+            process_cmd_5x_options(NewRec#ucp_cmd_5x{nrq = "1", npid = "0539"}, Opts, T);
+        false ->
+            process_cmd_5x_options(Rec, Opts, T)
+    end;
+process_cmd_5x_options(_Rec, _Opts, [{notification_request, Value}|_T]) ->
+    {error, {invalid_option_value, {notification_request, Value}}};
+process_cmd_5x_options(Rec, Opts, [{notification_type, Type}|T])
+  when is_integer(Type), Type >= 0, Type =< 7 ->
+    process_cmd_5x_options(Rec#ucp_cmd_5x{nt = integer_to_list(Type)}, Opts, T);
+process_cmd_5x_options(_Rec, _Opts, [{notification_type, Type}|_T]) ->
+    {error, {invalid_option_value, {notification_type, Type}}};
+process_cmd_5x_options(Rec, Opts, [{validity_period, Value}|T]) % DDMMYYHHmm
+  when is_list(Value), length(Value) =:= 10 ->
+    process_cmd_5x_options(Rec#ucp_cmd_5x{vp = Value}, Opts, T);
+process_cmd_5x_options(_Rec, _Opts, [{validity_period, Value}|_T]) ->
+    {error, {invalid_option_value, {validity_period, Value}}};
+process_cmd_5x_options(Rec, Opts, [{deferred_delivery_time, Value}|T]) % DDMMYYHHmm
+  when is_list(Value), length(Value) =:= 10 ->
+    process_cmd_5x_options(Rec#ucp_cmd_5x{dd = "1", ddt = Value}, Opts, T);
+process_cmd_5x_options(_Rec, _Opts, [{deferred_delivery_time, Value}|_T]) ->
+    {error, {invalid_option_value, {deferred_delivery_time, Value}}};
+% message_type handling
+process_cmd_5x_options(Rec, Opts, [{message_type, Type}|T])
+  when is_atom(Type) ->
+    % do not process message types when user
+    % specified custom XSer value
+    case proplists:get_value(xser, Opts) of
+        undefined ->
+            case lists:member(Type, get_message_types()) of
+                false ->
+                    {error, {invalid_option_value, {message_type, Type}}};
+                true ->
+                    NewRec = apply_message_type(Type, Rec),
+                    process_cmd_5x_options(NewRec, Opts, T)
+            end;
+        _ ->
+            % continue options processing
+            process_cmd_5x_options(Rec, Opts, T)
+    end;
+process_cmd_5x_options(_Rec, _Opts, [{message_type, Type}|_T]) ->
+    {error, {invalid_option_value, {message_type, Type}}};
+process_cmd_5x_options(_Rec, _Opts, [H|_T]) ->
+    {error, {unknown_option, H}}.
+
+get_message_types() ->
+    [text, unicode_text, binary, binary_stk].
+
+apply_message_type(unicode_text, Body) ->
+    Body#ucp_cmd_5x{
+              mt = "4",
+              xser = "020108"};
+apply_message_type(binary, Body) ->
+    Body#ucp_cmd_5x{
+              mt = "4"};
+apply_message_type(binary_stk, Body) ->
+    Body#ucp_cmd_5x{
+              rpid = "0127",
+              mcls = "2", %% class 2: message stored on the SIM
+              mt = "4", %% transparent data
+              xser = "01030270000201F60D0101", %% UDH with 7000 (STK)
+              pr = "0"};
+apply_message_type(_Other, Body) ->
+    % Do nothing
+    Body.
 
 %%--------------------------------------------------------------------
 %% Create body of UCP 60 - loging message
 %%--------------------------------------------------------------------
 create_cmd_60_body(Login,  Password) ->
-    IRAPassword = ucp_utils:to_hexstr(ucp_ira:to(ira, Password)),
+    IRAPassword = lists:flatten(ucp_utils:to_hexstr(ucp_ira:to(ira, Password))),
     Body = #ucp_cmd_60{
               oadc = Login,
               oton = "6",
@@ -315,3 +375,31 @@ get_udh_size([], Size) ->
 get_udh_size([{_IEI, {info_element, {_IEI, IEILen, _IEIData}}} | Rest], Size) ->
     get_udh_size(Rest, Size + 2 + IEILen).
 
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                               Eunit Tests                               %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+-ifdef (TEST).
+-include_lib("eunit/include/eunit.hrl").
+decoder_test_() ->
+    [
+        {"Detect message type",
+            [fun detect_type_bin/0,
+             fun detect_type_text/0]}
+        %{"Extract UCP packet(s) with presence of a two-element buffer",
+            %fun fragment_with_buffer_3/0}
+    ].
+
+detect_type_bin() ->
+    M = <<0, 12, 123, 34, 9>>,
+    ?assertEqual(
+        binary, detect_msg_type(M)
+    ).
+
+detect_type_text() ->
+    M = "test",
+    ?assertEqual(
+        text, detect_msg_type(M)
+    ).
+
+-endif.
