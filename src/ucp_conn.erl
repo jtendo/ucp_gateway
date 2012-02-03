@@ -70,7 +70,8 @@
           sending_window_size,   %% max number of messages that can be sent to smsc
                                  %% without waiting for acknowledge
           messages_unconfirmed,  %% number of messages waiting for acknowledge
-          transition_callback    %% function called when fsm changes state
+          transition_callback,   %% function called when fsm changes state
+          buffer                 %% TCP socket buffer
          }).
 
 %%===================================================================
@@ -190,6 +191,28 @@ handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
     {reply, {StateName, State}, StateName, State}.
 
+handle_ucp_packet([], StateName, State) ->
+    {next_state, StateName, State};
+handle_ucp_packet([RawData|NextData], StateName, State) ->
+    ?SYS_DEBUG("Handling packet: ~p", [RawData]),
+    {NextStateName, FinalState} = case catch handle_received_data(RawData, State) of
+        {ok, NewState} ->
+            % process queued messages
+            gen_fsm:send_all_state_event(self(), dequeue),
+            {get_next_state(NewState), NewState};
+        {auth_ok, NewState} ->
+            % process queued messages
+            gen_fsm:send_all_state_event(self(), dequeue),
+            {active, NewState};
+        {auth_failed, Reason, NewState} ->
+            ?SYS_WARN("Authentication on ~p failed: ~p", [NewState#state.name, Reason]),
+            {connecting, close_and_retry(NewState, ?GRACEFUL_RETRY_TIMEOUT)};
+        Error ->
+            ?SYS_WARN("Error handling TCP data: ~p", [Error]),
+            {StateName, State}
+    end,
+    handle_ucp_packet(NextData, NextStateName, FinalState).
+
 %% --------------------------------------------------------------------
 %% Handle packets arriving in various states
 %% --------------------------------------------------------------------
@@ -197,24 +220,11 @@ handle_info({tcp, _Socket, RawData}, connecting, State) ->
     ?SYS_WARN("TCP packet received when disconnected:~n~p", [RawData]),
     {next_state, connecting, State};
 
-handle_info({tcp, _Socket, RawData}, StateName, State) ->
+handle_info({tcp, _Socket, RawData}, StateName, State = #state{buffer = B}) ->
     %?SYS_DEBUG("TCP packet received in ~p state: ~p", [StateName, RawData]),
-    case catch handle_received_data(RawData, State) of
-        {ok, NewState} ->
-            % process queued messages
-            gen_fsm:send_all_state_event(self(), dequeue),
-            {next_state, get_next_state(NewState), NewState};
-        {auth_ok, NewState} ->
-            % process queued messages
-            gen_fsm:send_all_state_event(self(), dequeue),
-            {next_state, active, NewState};
-        {auth_failed, Reason, NewState} ->
-            ?SYS_WARN("Authentication on ~p failed: ~p", [NewState#state.name, Reason]),
-            {next_state, connecting, close_and_retry(NewState, ?GRACEFUL_RETRY_TIMEOUT)};
-        Error ->
-            ?SYS_WARN("Error handling TCP data: ~p", [Error]),
-            {next_state, StateName, State}
-    end;
+    {Messages, Buffered} = ucp_framing:try_decode(RawData, B),
+    %?SYS_INFO("====== Framed: ~p (~p)", [Messages, Buffered]),
+    handle_ucp_packet(Messages, StateName, State#state{buffer = Buffered});
 
 handle_info({tcp_closed, _Socket}, StateName, State) ->
     ?SYS_WARN("TCP connection closed in ~p state", [StateName]),
@@ -240,7 +250,7 @@ handle_info({timeout, Timer, {cmd_timeout, TRN}}, StateName, State) ->
             State
     end,
     case StateName of
-        wait_auth_ack -> {next_state, connecting, close_and_retry(NewState)};
+        wait_auth_response -> {next_state, connecting, close_and_retry(NewState)};
         _Other -> {next_state, StateName, NewState}
     end;
 
