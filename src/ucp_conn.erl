@@ -23,7 +23,6 @@
          get_name/1,
          send_message/3,
          send_message/4,
-         send_raw_message/3,
          close/1]).
 
 %% gen_fsm callbacks
@@ -71,7 +70,8 @@
           sending_window_size,   %% max number of messages that can be sent to smsc
                                  %% without waiting for acknowledge
           messages_unconfirmed,  %% number of messages waiting for acknowledge
-          transition_callback    %% function called when fsm changes state
+          transition_callback,   %% function called when fsm changes state
+          buffer                 %% TCP socket buffer
          }).
 
 %%===================================================================
@@ -103,9 +103,6 @@ send_message(Ref, Receiver, Message) ->
 
 send_message(Ref, Receiver, Message, Opts) ->
     gen_fsm:sync_send_event(Ref, {send_message, {Receiver, Message, Opts}}, ?CALL_TIMEOUT).
-
-send_raw_message(Ref, Cmd, Message) ->
-    gen_fsm:sync_send_event(Ref, {send_raw_message, {Cmd, Message}}, ?CALL_TIMEOUT).
 
 %% --------------------------------------------------------------------
 %% Shutdown connection (and process) asynchronous.
@@ -166,11 +163,11 @@ wait_response(Event, From, State) ->
 
 active(Event, From, State) ->
     %?SYS_DEBUG("Received event from ~p in active state: ~p", [From, Event]),
-    {ok, Reply, NewState} = enqueue_event(Event, From, State, true),
-    {reply, Reply, active, NewState}.
+    {ok, NewState} = enqueue_event(Event, From, State, true),
+    {next_state, active, NewState}.
 
-handle_event(dequeue, active, State) ->
-    %?SYS_DEBUG("Handling dequeue event in active state", []),
+handle_event(dequeue, StateName, State) ->
+    ?SYS_DEBUG("Handling dequeue event in ~p state", [StateName]),
     dequeue_message(State);
 
 handle_event(Event, StateName, State) ->
@@ -194,6 +191,28 @@ handle_sync_event(Event, From, StateName, State) ->
     ?SYS_INFO("Handling sync event from ~p in state ~p: ~p", [From, StateName, Event]),
     {reply, {StateName, State}, StateName, State}.
 
+handle_ucp_packet([], StateName, State) ->
+    {next_state, StateName, State};
+handle_ucp_packet([RawData|NextData], StateName, State) ->
+    ?SYS_DEBUG("Handling packet: ~p", [RawData]),
+    {NextStateName, FinalState} = case catch handle_received_data(RawData, State) of
+        {ok, NewState} ->
+            % process queued messages
+            gen_fsm:send_all_state_event(self(), dequeue),
+            {get_next_state(NewState), NewState};
+        {auth_ok, NewState} ->
+            % process queued messages
+            gen_fsm:send_all_state_event(self(), dequeue),
+            {active, NewState};
+        {auth_failed, Reason, NewState} ->
+            ?SYS_WARN("Authentication on ~p failed: ~p", [NewState#state.name, Reason]),
+            {connecting, close_and_retry(NewState, ?GRACEFUL_RETRY_TIMEOUT)};
+        Error ->
+            ?SYS_WARN("Error handling TCP data: ~p", [Error]),
+            {StateName, State}
+    end,
+    handle_ucp_packet(NextData, NextStateName, FinalState).
+
 %% --------------------------------------------------------------------
 %% Handle packets arriving in various states
 %% --------------------------------------------------------------------
@@ -201,24 +220,11 @@ handle_info({tcp, _Socket, RawData}, connecting, State) ->
     ?SYS_WARN("TCP packet received when disconnected:~n~p", [RawData]),
     {next_state, connecting, State};
 
-handle_info({tcp, _Socket, RawData}, StateName, State) ->
+handle_info({tcp, _Socket, RawData}, StateName, State = #state{buffer = B}) ->
     %?SYS_DEBUG("TCP packet received in ~p state: ~p", [StateName, RawData]),
-    case catch handle_received_data(RawData, State) of
-        {ok, NewState} ->
-            % process queued messages
-            gen_fsm:send_all_state_event(self(), dequeue),
-            {next_state, get_next_state(NewState), NewState};
-        {auth_ok, NewState} ->
-            % process queued messages
-            gen_fsm:send_all_state_event(self(), dequeue),
-            {next_state, active, NewState};
-        {auth_failed, Reason, NewState} ->
-            ?SYS_WARN("Authentication on ~p failed: ~p", [NewState#state.name, Reason]),
-            {next_state, connecting, close_and_retry(NewState, ?GRACEFUL_RETRY_TIMEOUT)};
-        Error ->
-            ?SYS_WARN("Error handling TCP data: ~p", [Error]),
-            {next_state, StateName, State}
-    end;
+    {Messages, Buffered} = ucp_framing:try_decode(RawData, B),
+    %?SYS_INFO("====== Framed: ~p (~p)", [Messages, Buffered]),
+    handle_ucp_packet(Messages, StateName, State#state{buffer = Buffered});
 
 handle_info({tcp_closed, _Socket}, StateName, State) ->
     ?SYS_WARN("TCP connection closed in ~p state", [StateName]),
@@ -344,7 +350,7 @@ apply_transition_callback(Transition, Pid, State) when is_pid(Pid) ->
 enqueue_event(Event, From, State) ->
     enqueue_event(Event, From, State, false).
 
-enqueue_event({send_message, {Receiver, Message, Opts}}, _From, State, Notify) ->
+enqueue_event({send_message, {Receiver, Message, Opts}}, From, State, Notify) ->
     Result = ucp_messages:create_cmd_51_body(
                             State#state.cref,
                             State#state.default_originator,
@@ -355,31 +361,19 @@ enqueue_event({send_message, {Receiver, Message, Opts}}, _From, State, Notify) -
         {ok, UpdatedCRef, Msgs} ->
             Id = get_message_id(),
             {ok, Q, Ids} = enqueue_message(Msgs, Id, length(Msgs), State#state.msg_q),
-            trigger_dequeue(Notify),
-            {ok, {ok, Ids}, State#state{msg_q = Q, cref = UpdatedCRef}};
+            gen_fsm:reply(From, {ok, Ids}),
+            case Notify of
+                true -> gen_fsm:send_all_state_event(self(), dequeue);
+                _ -> ok
+            end,
+            {ok, State#state{msg_q = Q, cref = UpdatedCRef}};
         _Error ->
-            {ok, Result, State}
-    end;
-enqueue_event({send_raw_message, {Cmd, Message}}, _From, State, Notify) ->
-    H = #ucp_header{ot = Cmd, o_r = "O"},
-    case ucp_utils:parse_body(H, Message) of
-        {ok, {Header, Body}} ->
-            Id = get_message_id(),
-            Msgs = [{cmd_body, Header#ucp_header.ot, Body}],
-            {ok, Q, Ids} = enqueue_message(Msgs, Id, length(Msgs), State#state.msg_q),
-            trigger_dequeue(Notify),
-            {ok, {ok, Ids}, State#state{msg_q = Q}};
-        Error ->
-            {ok, Error, State}
+            gen_fsm:reply(From, Result),
+            {ok, State}
     end;
 enqueue_event(Event, From, State, _Notify) ->
     ?SYS_WARN("Unknown event received from ~p: ~p", [From, Event]),
     {ok, State}.
-
-trigger_dequeue(true) ->
-    gen_fsm:send_all_state_event(self(), dequeue);
-trigger_dequeue(_) ->
-    ok.
 
 enqueue_message(Msgs, Id, Cnt, Q) ->
     enqueue_message(Msgs, Id, 1, Cnt, Q, []).
@@ -391,7 +385,7 @@ enqueue_message([H|T], Id, Idx, Cnt, Q, Ids) ->
     ?SYS_DEBUG("Enqueueing message (~s)", [MsgId]),
     %{cmd_body, Cmd, Body} = H,
     NQ = queue:in({MsgId, H}, Q),
-    %NQ = queue:in({MsgId, {cmd_body, Cmd, Body#ucp_cmd_5x{ac = ucp_utils:to_hexstr(MsgId)}}}, Q),
+    %NQ = queue:in({MsgId, {cmd_body, Cmd, Body#ucp_cmd_5x{ac = hex:to_hexstr(MsgId)}}}, Q),
     enqueue_message(T, Id, Idx+1, Cnt, NQ, [MsgId | Ids]).
 
 %%===================================================================
@@ -601,7 +595,7 @@ process_operation({#ucp_header{ot = "52"}, Body}, State) ->
     {ok, State};
 
 process_operation({#ucp_header{ot = "53"}, Body}, State) ->
-    Info = ucp_utils:hexstr_to_list(ucp_ira:to(ascii, Body#ucp_cmd_5x.msg)),
+    Info = hex:hexstr_to_list(ucp_utils:from_ira(Body#ucp_cmd_5x.msg)),
     ?SYS_INFO("Received delivery report message: ~p", [Info]),
     {ok, State};
 

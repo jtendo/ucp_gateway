@@ -99,6 +99,9 @@ handle_cast({connection_transition, {Pid, active}}, State) ->
     smart_join(?CONNECTIONS_ACTIVE, Pid),
     {noreply, State};
 
+handle_cast({connection_transition, {_Pid, wait_response}}, State) ->
+    {noreply, State};
+
 handle_cast({connection_transition, {Pid, _Transition}}, State) ->
     leave(?CONNECTIONS_ACTIVE, Pid),
     {noreply, State};
