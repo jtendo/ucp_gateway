@@ -242,11 +242,7 @@ split_message(CRef, XSer, Message) when is_binary(Message) ->
                             NewXSer
                       end,
             {result, [{ModXSer, Message}], CRef}
-    end;
-
-%TODO: check splitting for Text messages
-split_message(CRef, XSer, Message) ->
-    {result, [{XSer, Message}], CRef}.
+    end.
 
 add_concat_info(CRef, Bins, Services, UDH) ->
     NextCRef = case length(Bins) > 1 of
