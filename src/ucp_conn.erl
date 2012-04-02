@@ -101,7 +101,7 @@ get_reverse_config(Ref) ->
 send_message(Ref, Receiver, Message) ->
     send_message(Ref, Receiver, Message, []).
 
-send_message(Ref, Receiver, Message, Opts) ->
+send_message(Ref, Receiver, Message, Opts) when is_list(Opts) ->
     gen_fsm:sync_send_event(Ref, {send_message, {Receiver, Message, Opts}}, ?CALL_TIMEOUT).
 
 %% --------------------------------------------------------------------
