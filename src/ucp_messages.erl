@@ -107,6 +107,9 @@ process_cmd_5x_options(Rec, _Opts, []) ->
 process_cmd_5x_options(Rec, Opts, [{split, _}|T]) ->
     % pass through
     process_cmd_5x_options(Rec, Opts, T);
+process_cmd_5x_options(Rec, Opts, [{originator, Value}|T]) when is_list(Value) ->
+    {OTOA, UCPSender} = ucp_utils:encode_sender(Value),
+    process_cmd_5x_options(Rec#ucp_cmd_5x{oadc = UCPSender, otoa = OTOA}, Opts, T);
 process_cmd_5x_options(Rec, Opts, [{notification_request, Value}|T])
   when is_boolean(Value) ->
     case Value of
@@ -242,11 +245,7 @@ split_message(CRef, XSer, Message) when is_binary(Message) ->
                             NewXSer
                       end,
             {result, [{ModXSer, Message}], CRef}
-    end;
-
-%TODO: check splitting for Text messages
-split_message(CRef, XSer, Message) ->
-    {result, [{XSer, Message}], CRef}.
+    end.
 
 add_concat_info(CRef, Bins, Services, UDH) ->
     NextCRef = case length(Bins) > 1 of
