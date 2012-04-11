@@ -167,7 +167,7 @@ active(Event, From, State) ->
     {next_state, active, NewState}.
 
 handle_event(dequeue, StateName, State) ->
-    ?SYS_DEBUG("Handling dequeue event in ~p state", [StateName]),
+    %?SYS_DEBUG("Received dequeue event in state: ~p", [StateName]),
     dequeue_message(State);
 
 handle_event(Event, StateName, State) ->
@@ -273,9 +273,9 @@ handle_info({timeout, _Timer, keepalive_timeout}, active, State) ->
 %% Cancel keepalive timer when not in active state
 %%--------------------------------------------------------------------
 handle_info({timeout, _Timer, keepalive_timeout}, StateName, State) ->
-    ?SYS_WARN("Canceling keepalive timer in non active state", []),
+    ?SYS_DEBUG("Canceling keepalive timer in state ~p: ~p", [StateName, State#state.keepalive_timer]),
     cancel_timer(State#state.keepalive_timer),
-    {next_state, StateName, State};
+    {next_state, StateName, State#state{keepalive_timer = undefined}};
 
 %%--------------------------------------------------------------------
 %% Handle configuration change
@@ -397,24 +397,23 @@ dequeue_message(State) ->
             %?SYS_DEBUG("Dequeueing...", []),
             case queue:out(State#state.msg_q) of
                 {{value, Message}, Q} ->
-                    %?SYS_INFO("Canceling keepalive timer", []),
                     cancel_timer(State#state.keepalive_timer),
-                    case process_queued_message(Message, State#state{msg_q = Q}) of
+                    case process_queued_message(Message, State#state{msg_q = Q, keepalive_timer = undefined}) of
                         {_, active, NewState} ->
                             dequeue_message(NewState);
                         Res ->
                             Res
                     end;
                 {empty, _} ->
+                    cancel_timer(State#state.keepalive_timer),
                     Timer = erlang:start_timer(State#state.keepalive_interval, self(), keepalive_timeout),
                     %?SYS_INFO("Starting keepalive timer: ~p", [Timer]),
                     {next_state, active, State#state{keepalive_timer = Timer}}
             end;
        false ->
             %?SYS_DEBUG("Sending not allowed...", []),
-            %?SYS_INFO("Canceling keepalive timer", []),
             cancel_timer(State#state.keepalive_timer),
-            {next_state, wait_response, State}
+            {next_state, wait_response, State#state{keepalive_timer = undefined}}
     end.
 
 process_queued_message({Id, Body}, State) ->
@@ -470,8 +469,10 @@ close_and_retry(State, Timeout) ->
                  (_, _, V) ->
                       V
               end, {State#state.msg_q, State#state.messages_unconfirmed}, State#state.dict),
+    cancel_timer(State#state.keepalive_timer),
     erlang:send_after(Timeout, self(), {timeout, retry_connect}),
-    State#state{socket = null, msg_q = Queue, dict = dict:new(), messages_unconfirmed = UnconfirmedNo}.
+    State#state{keepalive_timer = undefined, socket = null,
+                msg_q = Queue, dict = dict:new(), messages_unconfirmed = UnconfirmedNo}.
 
 %%===================================================================
 %% Send message through active socket
