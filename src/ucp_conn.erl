@@ -166,7 +166,7 @@ active(Event, From, State) ->
     {ok, NewState} = enqueue_event(Event, From, State, true),
     {next_state, active, NewState}.
 
-handle_event(dequeue, StateName, State) ->
+handle_event(dequeue, _StateName, State) ->
     %?SYS_DEBUG("Received dequeue event in state: ~p", [StateName]),
     dequeue_message(State);
 
@@ -592,7 +592,8 @@ process_operation({#ucp_header{ot = "52"}, Body}, State) ->
     Recipient = Body#ucp_cmd_5x.adc,
     Data = Body#ucp_cmd_5x.msg,
     Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
-    gen_event:notify(ucp_event, {sms, {Recipient, Sender, Data}}),
+    Type = Body#ucp_cmd_5x.mt,
+    gen_event:notify(ucp_event, {sms, {Recipient, Sender, Type, Data}}),
     {ok, State};
 
 process_operation({#ucp_header{ot = "53"}, Body}, State) ->
