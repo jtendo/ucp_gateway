@@ -15,7 +15,6 @@
 
 -include_lib("ucp_common/include/ucp_syntax.hrl").
 -include("logger.hrl").
--include("utils.hrl").
 
 %% API
 -export([start_link/1,
@@ -52,6 +51,12 @@
 -define(SENDING_WINDOW_SIZE, ?CFG(sending_window_size, ucp_conf, 1)).
 -define(TCP_OPTIONS, [binary, {packet, 0}, {active, true}, {reuseaddr, true},
         {keepalive, true}, {send_timeout, ?SEND_TIMEOUT}, {send_timeout_close, false}]).
+-define(CFG, fun(Key,ConfFile,Default) ->
+                     Terms = confetti:fetch(ConfFile),
+                     proplists:get_value(Key, Terms, Default)
+             end).
+
+
 
 -record(state, {
           name,                  %% name of connection
@@ -590,9 +595,9 @@ log_result(MsgId, Body) ->
 process_operation({#ucp_header{ot = "52"}, Body}, State) ->
     % Ref message
     Recipient = Body#ucp_cmd_5x.adc,
-    Data = Body#ucp_cmd_5x.msg,
     Sender = ucp_utils:decode_sender(Body#ucp_cmd_5x.otoa, Body#ucp_cmd_5x.oadc),
-    Type = Body#ucp_cmd_5x.mt,
+    Type = erlang:list_to_integer(Body#ucp_cmd_5x.mt),
+    Data = decode_data(Type, Body#ucp_cmd_5x.msg),
     gen_event:notify(ucp_event, {sms, {Recipient, Sender, Type, Data}}),
     {ok, State};
 
@@ -604,6 +609,13 @@ process_operation({#ucp_header{ot = "53"}, Body}, State) ->
 process_operation(Message, State) ->
     ?SYS_DEBUG("Unhandled message: ~p", [Message]),
     {ok, State}.
+
+decode_data(2, Data) -> % Numeric Message
+    Data;
+decode_data(3, Data) -> % Alphanumeric Message encoded into IRA characters
+    ucp_utils:hexstr_to_list(ucp_ira:to(ascii, Data));
+decode_data(4, Data) ->
+    Data.
 
 get_msg_rec(TRN, Dict) ->
     case dict:find(TRN, Dict) of
