@@ -162,6 +162,8 @@ process_cmd_5x_options(Rec, Opts, [{message_type, Type}|T])
     end;
 process_cmd_5x_options(_Rec, _Opts, [{message_type, Type}|_T]) ->
     {error, {invalid_option_value, {message_type, Type}}};
+process_cmd_5x_options(Rec, Opts, [{xser, Value}|T]) when is_list(Value) ->
+    process_cmd_5x_options(Rec#ucp_cmd_5x{xser = Value}, Opts, T);
 process_cmd_5x_options(_Rec, _Opts, [H|_T]) ->
     {error, {unknown_option, H}}.
 
