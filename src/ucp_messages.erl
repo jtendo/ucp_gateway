@@ -145,20 +145,17 @@ process_cmd_5x_options(_Rec, _Opts, [{deferred_delivery_time, Value}|_T]) ->
 % message_type handling
 process_cmd_5x_options(Rec, Opts, [{message_type, Type}|T])
   when is_atom(Type) ->
-    % do not process message types when user
-    % specified custom XSer value
-    case proplists:get_value(xser, Opts) of
-        undefined ->
-            case lists:member(Type, get_message_types()) of
-                false ->
-                    {error, {invalid_option_value, {message_type, Type}}};
-                true ->
-                    NewRec = apply_message_type(Type, Rec),
-                    process_cmd_5x_options(NewRec, Opts, T)
-            end;
-        _ ->
-            % continue options processing
-            process_cmd_5x_options(Rec, Opts, T)
+    case lists:member(Type, get_message_types()) of
+        false ->
+            {error, {invalid_option_value, {message_type, Type}}};
+        true ->
+            NewRec = apply_message_type(Type, Rec),
+            FinalRec = case Rec#ucp_cmd_5x.xser of
+                [] -> NewRec;
+                XSer -> % Use user's value
+                    NewRec#ucp_cmd_5x{xser = XSer}
+            end,
+            process_cmd_5x_options(FinalRec, Opts, T)
     end;
 process_cmd_5x_options(_Rec, _Opts, [{message_type, Type}|_T]) ->
     {error, {invalid_option_value, {message_type, Type}}};
