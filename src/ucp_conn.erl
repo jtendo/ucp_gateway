@@ -467,7 +467,7 @@ close_and_retry(State) ->
 close_and_retry(State, Timeout) ->
     catch gen_tcp:close(State#state.socket),
     % put unconfirmed messages back on queue
-    {Queue, UnconfirmedNo} = dict:fold(
+    {Queue, _UnconfirmedNo} = dict:fold(
               fun(_Id, [{Timer, Id, Msg}|_], {Q, C}) ->
                       cancel_timer(Timer),
                       {queue:in_r({Id, Msg}, Q), C - 1};
@@ -477,7 +477,7 @@ close_and_retry(State, Timeout) ->
     cancel_timer(State#state.keepalive_timer),
     erlang:send_after(Timeout, self(), {timeout, retry_connect}),
     State#state{keepalive_timer = undefined, socket = null,
-                msg_q = Queue, dict = dict:new(), messages_unconfirmed = UnconfirmedNo}.
+                msg_q = Queue, dict = dict:new(), messages_unconfirmed = 0}.
 
 %%===================================================================
 %% Send message through active socket
